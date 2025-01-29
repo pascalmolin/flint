@@ -185,13 +185,16 @@ _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
 
     nmod_init(&mod, f.modp);
 
-    /* initialize with c[0] * E_2(1 mod N) */ 
-
     g = _nmod_vec_init(len);
 
-    g[0] = 0;
-    _nmod_poly_euler_product(g, len, _nmod_euler_factor_E2_1N, (void *)f.N, mod);
-    _nmod_vec_scalar_mul_nmod(g, g, len, f.coefs[0], mod);
+
+    /* initialize with c[0] * E_2(1 mod N) */ 
+    {
+        ulong c = nmod_set_si(f.coefs[0], mod);
+        g[0] = 0;
+        _nmod_poly_euler_product(g, len, _nmod_euler_factor_E2_1N, (void *)f.N, mod);
+        _nmod_vec_scalar_mul_nmod(g, g, len, c, mod);
+    }
 
     /* then add products c[k] * E1(chi) * E1(chi^-1) */
 
@@ -222,6 +225,7 @@ _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
     _nmod_vec_clear(g1);
     _nmod_vec_clear(g2);
 
+    g[0] = 0;
     _fmpz_vec_set_nmod_vec(a, g, len, mod);
 
     _nmod_vec_clear(g);
@@ -328,6 +332,7 @@ _fmpz_modular_form_f11_expansion(fmpz * a, slong len)
     flint_printf("compute ( a += 5*g2 ) / 2...");
     _fmpz_vec_scalar_addmul_si(a, g2, len, 5);
     _fmpz_vec_scalar_tdiv_q_2exp(a, a, len, 1);
+    a[0] = 0;
     flint_printf("[done]\n");
     TIMEIT_ONCE_STOP
 
