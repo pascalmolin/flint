@@ -215,17 +215,29 @@ _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
 
         mf_eis_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
 
+        TIMEIT_ONCE_START
+        flint_printf("[ char %ld ] euler g1...", k+1);
         g1[0] = nmod_set_si(f.E0[2*k], mod);
         _nmod_poly_euler_product(g1, len, _nmod_euler_factor_E1_chi, ctx, mod);
+        flint_printf("[done]\n");
+        TIMEIT_ONCE_STOP
 
+        TIMEIT_ONCE_START
+        flint_printf("           euler g2...");
         mf_eis_ctx_dual(ctx, mod);
         g2[0] = nmod_set_si(f.E0[2*k+1], mod);
         _nmod_poly_euler_product(g2, len, _nmod_euler_factor_E1_chi, ctx, mod);
+        flint_printf("[done]\n");
+        TIMEIT_ONCE_STOP
 
         mf_eis_ctx_clear(ctx);
 
+        TIMEIT_ONCE_START
+        flint_printf("           product g1 * g2...");
         _nmod_poly_mullow(g12, g1, len, g2, len, len, mod);
         _nmod_vec_scalar_addmul_nmod(g, g12, len, c, mod);
+        flint_printf("[done]\n");
+        TIMEIT_ONCE_STOP
     }
     _nmod_vec_clear(g12);
     _nmod_vec_clear(g1);
@@ -364,8 +376,8 @@ int main(int argc, char* argv[])
 
     if (argc != 3 || len < 1)
     {
-        flint_printf("Syntax: ell11an <integer>\n");
-        flint_printf("where <integer> is the (positive) number of terms to compute\n");
+        flint_printf("Syntax: mfcoefs <level> <length>\n");
+        flint_printf("where <length> is the (positive) number of terms to compute\n");
         return EXIT_FAILURE;
     }
 
@@ -384,6 +396,11 @@ int main(int argc, char* argv[])
     if (len < 1000)
     {
         _fmpz_vec_print(a, len); flint_printf("\n");
+    }
+    else
+    {
+        _fmpz_vec_print(a, 100); flint_printf(" [...] \n");
+        _fmpz_vec_print(a + len - 101, 100); flint_printf("\n");
     }
 
     _fmpz_vec_clear(a, len);
