@@ -5,6 +5,7 @@
 #include "ulong_extras.h"
 #include "nmod_vec.h"
 #include "nmod_poly.h"
+#include "fft_small.h"
 #include "fmpz.h"
 #include "fmpz_vec.h"
 #include "fmpz_poly.h"
@@ -187,27 +188,32 @@ _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
     nmod_t mod;
     dirichlet_group_t G;
     slong k;
+    ulong pow2 = n_clog2(len), len2;
     nn_ptr g, g1, g2, g12;
+    mpn_ctx_t fft_ctx;
 
+    FLINT_ASSERT(n_trailing_zeros(f.modp-1) > pow2);
     nmod_init(&mod, f.modp);
+    mpn_ctx_init(fft_ctx, mod.n);
+    len2 = 1UL << pow2;
+    len2 = len;
 
-    g = _nmod_vec_init(len);
-
+    g = _nmod_vec_init(len2);
 
     /* initialize with c[0] * E_2(1 mod N) */ 
     {
         ulong c = nmod_set_si(f.coefs[0], mod);
         g[0] = 0;
-        _nmod_poly_euler_product(g, len, _nmod_euler_factor_E2_1N, (void *)f.N, mod);
-        _nmod_vec_scalar_mul_nmod(g, g, len, c, mod);
+        _nmod_poly_euler_product(g, len2, _nmod_euler_factor_E2_1N, (void *)f.N, mod);
+        _nmod_vec_scalar_mul_nmod(g, g, len2, c, mod);
     }
 
     /* then add products c[k] * E1(chi) * E1(chi^-1) */
 
     dirichlet_group_init(G, f.N);
-    g1 = _nmod_vec_init(len);
-    g2 = _nmod_vec_init(len);
-    g12 = _nmod_vec_init(len);
+    g1 = _nmod_vec_init(len2);
+    g2 = _nmod_vec_init(len2);
+    g12 = _nmod_vec_init(len2);
     for (k = 0; k < f.nchi; k++)
     {
         mf_eis_ctx_t ctx;
@@ -218,7 +224,7 @@ _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
         TIMEIT_ONCE_START
         flint_printf("[ char %ld ] euler g1...", k+1);
         g1[0] = nmod_set_si(f.E0[2*k], mod);
-        _nmod_poly_euler_product(g1, len, _nmod_euler_factor_E1_chi, ctx, mod);
+        _nmod_poly_euler_product(g1, len2, _nmod_euler_factor_E1_chi, ctx, mod);
         flint_printf("[done]\n");
         TIMEIT_ONCE_STOP
 
@@ -226,28 +232,39 @@ _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
         flint_printf("           euler g2...");
         mf_eis_ctx_dual(ctx, mod);
         g2[0] = nmod_set_si(f.E0[2*k+1], mod);
-        _nmod_poly_euler_product(g2, len, _nmod_euler_factor_E1_chi, ctx, mod);
+        _nmod_poly_euler_product(g2, len2, _nmod_euler_factor_E1_chi, ctx, mod);
         flint_printf("[done]\n");
         TIMEIT_ONCE_STOP
 
         mf_eis_ctx_clear(ctx);
 
+#if 0
         TIMEIT_ONCE_START
-        flint_printf("           product g1 * g2...");
-        _nmod_poly_mullow(g12, g1, len, g2, len, len, mod);
-        _nmod_vec_scalar_addmul_nmod(g, g12, len, c, mod);
+        flint_printf("           default product g1 * g2...");
+        _nmod_poly_mullow(g12, g1, len2, g2, len2, len2, mod);
         flint_printf("[done]\n");
         TIMEIT_ONCE_STOP
+#else
+        /* force fft_small to use prime mod.n */
+        TIMEIT_ONCE_START
+        flint_printf("           hacked product g1 * g2...");
+        _nmod_poly_mul_mid_mpn_ctx(g12, 0, len2, g1, len2, g2, len2, mod, fft_ctx);
+        flint_printf("[done]\n");
+        TIMEIT_ONCE_STOP
+#endif
+        _nmod_vec_scalar_addmul_nmod(g, g12, len2, c, mod);
+ 
     }
     _nmod_vec_clear(g12);
     _nmod_vec_clear(g1);
     _nmod_vec_clear(g2);
+    mpn_ctx_clear(fft_ctx);
 
     g[0] = 0;
     if (f.denom > 1)
     {
         ulong inv = nmod_inv(f.denom, mod);
-        _nmod_vec_scalar_mul_nmod(g, g, len, inv, mod);
+        _nmod_vec_scalar_mul_nmod(g, g, len2, inv, mod);
     }
     _fmpz_vec_set_nmod_vec(a, g, len, mod);
 
