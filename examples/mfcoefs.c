@@ -35,12 +35,18 @@ struct mf_eis_desc {
 
 /* [[1, 10], t - 1, [Mod(-1, t + 1), 2], [[1/2], [1/2]], [-3/2, 5/2]] */
 const struct mf_eis_desc f11 = {
-    11, 1, (const slong[]){ 10 },
-    1, (const slong[]) { 0 },
-    1, 1, 1,
+    //11, 1, (const slong[]){ 10 },
+    //1, (const slong[]) { 0 },
+    //1, 1, 1,
+    //2,
+    //(const slong[]){ 1 , 1},
+    //(const slong[]){ -3, 5 }
+    11, 1, (const long[]){ 10 },
+    1, (const long[]){ -1 },
+    2, 992515402498049, 992515402498048,
     2,
-    (const slong[]){ 1 , 1},
-    (const slong[]){ -3, 5 }
+    (const long[]){ -496257701249024,-496257701249024 },
+    (const long[]){ -3,5 }
 };
 /* [[1, 30, 6], y^2 - y - 1, [Mod(t, t^2 - t + 1), 6], [[3/2], [3/2], [Mod(-t + 2, t^2 - t + 1)], [Mod(t + 1, t^2 - t + 1)]], [-7/2, 3/2, 1/6, 1/2, 4/3, -1]] */
 const struct mf_eis_desc f31 = { // [3/2*y - 7/2, 1/2*y + 1/6, -y + 4/3]
@@ -48,7 +54,7 @@ const struct mf_eis_desc f31 = { // [3/2*y - 7/2, 1/2*y + 1/6, -y + 4/3]
     2, (const slong[]){ -1,-1 },
     6, 583189986803713, 490018832356491,
     6,
-    (const slong[]){ 9,9,559026926683344,24163060120387 },
+    (const long[]){ -291594993401855,-291594993401855,93171154447224,-93171154447221 },
     (const slong[]){ -21,9,1,3,8,-6 }
 };
 const struct mf_eis_desc f61 = {
@@ -56,7 +62,7 @@ const struct mf_eis_desc f61 = {
     3, (const slong[]){ 1,-3,-1 },
     12, 1108668498051073, 1071723438326607,
     6,
-    (const slong[]){ 556696293403974,551972204647105,689816104188213,1088904263977216,423576482619735,15040145316994 },
+    (const long[]){ 92782715567329,-92782715567328,-439364898327501,551040210013227,-483738168588914,372062856903190 },
     (const slong[]){ 0,-3,0,12,3,-4,-111675311685725,-111675311685722,111675311685724,111675311685725,111675311685728,-111675311685726 }
 };
 
@@ -226,6 +232,11 @@ _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
     _nmod_vec_clear(g2);
 
     g[0] = 0;
+    if (f.denom > 1)
+    {
+        ulong inv = nmod_inv(f.denom, mod);
+        _nmod_vec_scalar_mul_nmod(g, g, len, inv, mod);
+    }
     _fmpz_vec_set_nmod_vec(a, g, len, mod);
 
     _nmod_vec_clear(g);
@@ -361,7 +372,8 @@ int main(int argc, char* argv[])
     a = _fmpz_vec_init(len);
 
     if (N == 11)
-        _fmpz_modular_form_f11_expansion(a, len);
+        //_fmpz_modular_form_f11_expansion(a, len);
+        _fmpz_modular_form_expansion(a, len, f11);
     else if (N == 31)
         _fmpz_modular_form_expansion(a, len, f31);
     else if (N == 61)
