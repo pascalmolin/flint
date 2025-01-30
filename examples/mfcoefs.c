@@ -133,24 +133,6 @@ _nmod_poly_set_euler_factor(nn_ptr z, slong len, nn_srcptr c, slong deg, slong p
     }
 }
 
-void
-_nmod_poly_set_euler_factor_conj(nn_ptr z1, nn_ptr z2, slong len, nn_srcptr c1, nn_srcptr c2, slong deg, slong p, nmod_t mod)
-{
-    slong e, pe;
-    for (e = 1, pe = p; e <= deg; e++, pe *= p)
-    {
-        slong m, pem, r;
-        for (m = 1, pem = pe; pem < len; m++, pem += pe)
-        {
-            for(r = 1; r < p && pem < len; m++, pem += pe, r++)
-            {
-                z1[pem] = nmod_mul(z1[m], c1[e], mod);
-                z2[pem] = nmod_mul(z2[m], c2[e], mod);
-            }
-        }
-    }
-}
-
 /* euler factor of Eisenstein series, 1/((1-chi(p)*x)*(1-p*x)) */
 typedef void _nmod_euler_func_t(nn_ptr fp, slong deg, slong p, void * ctx, nmod_t mod);
 
@@ -199,70 +181,6 @@ _nmod_poly_euler_product(nn_ptr z, slong len, _nmod_euler_func_t factor, void * 
     n_primes_clear(iter);
 }
 
-slong
-_nmod_poly_set_euler_factor_small(nn_ptr z, slong len, nn_srcptr c, slong deg, slong p, slong * s, slong ns, nmod_t mod)
-{
-    slong e, pe, ns1 = ns;
-    for (e = 1, pe = p; e <= deg; e++, pe *= p)
-    {
-        slong i;
-        for (i = 0; i < ns; i++)
-        {
-            slong m = s[i], pem = pe*m;
-            if (pem > len) continue;
-            z[pem] = nmod_mul(z[m], c[e], mod);
-            s[ns1++] = pem;
-        }
-    }
-    return ns1;
-}
-
-void
-_nmod_poly_euler_product_stages(nn_ptr z, slong len, _nmod_euler_func_t factor, void * ctx, nmod_t mod)
-{
-    n_primes_t iter;
-    slong p, B, ns;
-    slong * s;
-    ulong fp[30];
-    n_primes_init(iter);
-
-    /* number of smooth indices stored */
-    B = n_cbrt(len);
-
-    s = (slong *)flint_malloc(len * sizeof(slong));
-    z[1] = 1;
-
-    for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
-    {
-        slong deg = n_flog(len, p);
-        factor(fp, deg, p, ctx, mod);
-        if (p < B && ns < len)
-            ns = _nmod_poly_set_euler_factor_small(z, len, fp, deg, p, s, ns, mod);
-        else
-            _nmod_poly_set_euler_factor(z, len, fp, deg, p, mod);
-    }
-    n_primes_clear(iter);
-    flint_free(s);
-}
-
-void
-_nmod_poly_euler_product_conj(nn_ptr z1, nn_ptr z2, slong len, _nmod_euler_func_t factor, void * ctx, void * ctx2, nmod_t mod)
-{
-    n_primes_t iter;
-    slong p;
-    ulong fp1[30], fp2[30];
-    n_primes_init(iter);
-
-    z1[1] = z2[1] = 1;
-    for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
-    {
-        slong deg = n_flog(len, p);
-        factor(fp1, deg, p, ctx, mod);
-        factor(fp2, deg, p, ctx2, mod);
-        _nmod_poly_set_euler_factor_conj(z1, z2, len, fp1, fp2, deg, p, mod);
-    }
-    n_primes_clear(iter);
-}
 /* currently only output constant coefficients mod poly */
 void
 _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
@@ -270,35 +188,32 @@ _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
     nmod_t mod;
     dirichlet_group_t G;
     slong k;
-    ulong pow2 = n_clog2(len), len2;
     nn_ptr g, g1, g2, g12;
     mpn_ctx_t fft_ctx;
 
-    FLINT_ASSERT(n_trailing_zeros(f.modp-1) > pow2);
+    FLINT_ASSERT(n_trailing_zeros(f.modp-1) > n_clog2(len));
     nmod_init(&mod, f.modp);
     mpn_ctx_init(fft_ctx, mod.n);
-    len2 = 1UL << pow2;
-    len2 = len;
 
-    g = _nmod_vec_init(len2);
+    g = _nmod_vec_init(len);
 
     /* initialize with c[0] * E_2(1 mod N) */
     {
         ulong c = nmod_set_si(f.coefs[0], mod);
         g[0] = 0;
-        _nmod_poly_euler_product(g, len2, _nmod_euler_factor_E2_1N, (void *)f.N, mod);
-        _nmod_vec_scalar_mul_nmod(g, g, len2, c, mod);
+        _nmod_poly_euler_product(g, len, _nmod_euler_factor_E2_1N, (void *)f.N, mod);
+        _nmod_vec_scalar_mul_nmod(g, g, len, c, mod);
     }
 
     /* then add products c[k] * E1(chi) * E1(chi^-1) */
 
     dirichlet_group_init(G, f.N);
-    g1 = _nmod_vec_init(len2);
-    g2 = _nmod_vec_init(len2);
-    g12 = _nmod_vec_init(len2);
+    g1 = _nmod_vec_init(len);
+    g2 = _nmod_vec_init(len);
+    g12 = _nmod_vec_init(len);
     for (k = 0; k < f.nchi; k++)
     {
-        mf_eis_ctx_t ctx, ctx2;
+        mf_eis_ctx_t ctx;
         ulong c = nmod_set_si(f.coefs[(k+1)*f.degy], mod);
 
         TIMEIT_ONCE_START
@@ -307,24 +222,17 @@ _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
         TIMEIT_ONCE_STOP
 
         TIMEIT_ONCE_START
-        flint_printf("##    euler g1 and g2...", k+1);
-        mf_eis_ctx_init(ctx2, G, f.chi[k], f.ord, nmod_inv(f.z,mod), mod);
-        _nmod_poly_euler_product_conj(g1, g2, len2, _nmod_euler_factor_E1_chi, ctx, ctx2, mod);
-        flint_printf("[done]\n");
-        TIMEIT_ONCE_STOP
-
-        TIMEIT_ONCE_START
-        flint_printf("##    euler g1 with stages...", k+1);
+        flint_printf("##    euler g1...");
         g1[0] = nmod_set_si(f.E0[2*k], mod);
-        _nmod_poly_euler_product_stages(g1, len2, _nmod_euler_factor_E1_chi, ctx, mod);
+        _nmod_poly_euler_product(g1, len, _nmod_euler_factor_E1_chi, ctx, mod);
         flint_printf("[done]\n");
         TIMEIT_ONCE_STOP
 
         TIMEIT_ONCE_START
-        flint_printf("##    euler g2 direct...");
+        flint_printf("##    euler g2...");
         mf_eis_ctx_dual(ctx, mod);
         g2[0] = nmod_set_si(f.E0[2*k+1], mod);
-        _nmod_poly_euler_product(g2, len2, _nmod_euler_factor_E1_chi, ctx, mod);
+        _nmod_poly_euler_product(g2, len, _nmod_euler_factor_E1_chi, ctx, mod);
         flint_printf("[done]\n");
         TIMEIT_ONCE_STOP
 
@@ -340,11 +248,11 @@ _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
         /* force fft_small to use prime mod.n */
         TIMEIT_ONCE_START
         flint_printf("           hacked product g1 * g2...");
-        _nmod_poly_mul_mid_mpn_ctx(g12, 0, len2, g1, len2, g2, len2, mod, fft_ctx);
+        _nmod_poly_mul_mid_mpn_ctx(g12, 0, len, g1, len, g2, len, mod, fft_ctx);
         flint_printf("[done]\n");
         TIMEIT_ONCE_STOP
 #endif
-        _nmod_vec_scalar_addmul_nmod(g, g12, len2, c, mod);
+        _nmod_vec_scalar_addmul_nmod(g, g12, len, c, mod);
 
     }
     _nmod_vec_clear(g12);
@@ -356,7 +264,7 @@ _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
     if (f.denom > 1)
     {
         ulong inv = nmod_inv(f.denom, mod);
-        _nmod_vec_scalar_mul_nmod(g, g, len2, inv, mod);
+        _nmod_vec_scalar_mul_nmod(g, g, len, inv, mod);
     }
     _fmpz_vec_set_nmod_vec(a, g, len, mod);
 
@@ -364,10 +272,114 @@ _fmpz_modular_form_expansion(fmpz * a, slong len, const struct mf_eis_desc f)
     dirichlet_group_clear(G);
 }
 
+/* currently only output constant coefficients mod poly */
+void
+_fmpz_mat_modular_form_expansion(fmpz * a, slong deg, slong len, const struct mf_eis_desc f)
+{
+    nmod_t mod;
+    dirichlet_group_t G;
+    slong i, k;
+    nn_ptr m, g, g0, g1, g2, g12;
+    mpn_ctx_t fft_ctx;
+
+    FLINT_ASSERT(deg <= f.degy);
+    FLINT_ASSERT(n_trailing_zeros(f.modp-1) > n_clog2(len));
+    nmod_init(&mod, f.modp);
+    mpn_ctx_init(fft_ctx, mod.n);
+
+    m = _nmod_vec_init(deg * len);
+
+    /* initialize with E_2(1 mod N) */
+
+    g0 = _nmod_vec_init(len);
+    _nmod_poly_euler_product(g0, len, _nmod_euler_factor_E2_1N, (void *)f.N, mod);
+
+    for (i = 0, g = m; i < deg; g += len, i++)
+    {
+        ulong c = nmod_set_si(f.coefs[0 + i], mod);
+        g[0] = 0;
+        _nmod_vec_scalar_mul_nmod(g, g0, len, c, mod);
+    }
+
+    _nmod_vec_clear(g0);
+
+    /* then add products c[k] * E1(chi) * E1(chi^-1) */
+
+    dirichlet_group_init(G, f.N);
+    g1 = _nmod_vec_init(len);
+    g2 = _nmod_vec_init(len);
+    g12 = _nmod_vec_init(len);
+    for (k = 0; k < f.nchi; k++)
+    {
+        mf_eis_ctx_t ctx;
+
+        TIMEIT_ONCE_START
+        flint_printf("[ char %ld ]\n",k+1);
+        mf_eis_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
+        TIMEIT_ONCE_STOP
+
+        TIMEIT_ONCE_START
+        flint_printf("##    euler g1...");
+        g1[0] = nmod_set_si(f.E0[2*k], mod);
+        _nmod_poly_euler_product(g1, len, _nmod_euler_factor_E1_chi, ctx, mod);
+        flint_printf("[done]\n");
+        TIMEIT_ONCE_STOP
+
+        TIMEIT_ONCE_START
+        flint_printf("##    euler g2...");
+        mf_eis_ctx_dual(ctx, mod);
+        g2[0] = nmod_set_si(f.E0[2*k+1], mod);
+        _nmod_poly_euler_product(g2, len, _nmod_euler_factor_E1_chi, ctx, mod);
+        flint_printf("[done]\n");
+        TIMEIT_ONCE_STOP
+
+        mf_eis_ctx_clear(ctx);
+
+#if 0
+        TIMEIT_ONCE_START
+        flint_printf("           default product g1 * g2...");
+        _nmod_poly_mullow(g12, g1, len2, g2, len2, len2, mod);
+        flint_printf("[done]\n");
+        TIMEIT_ONCE_STOP
+#else
+        /* force fft_small to use prime mod.n */
+        TIMEIT_ONCE_START
+        flint_printf("           hacked product g1 * g2...");
+        _nmod_poly_mul_mid_mpn_ctx(g12, 0, len, g1, len, g2, len, mod, fft_ctx);
+        flint_printf("[done]\n");
+        TIMEIT_ONCE_STOP
+#endif
+
+        for (i = 0, g = m; i < deg; g += len, i++)
+        {
+            ulong c = nmod_set_si(f.coefs[(k+1)*f.degy + i], mod);
+            _nmod_vec_scalar_addmul_nmod(g, g12, len, c, mod);
+            g[0] = 0;
+        }
+
+    }
+    _nmod_vec_clear(g12);
+    _nmod_vec_clear(g1);
+    _nmod_vec_clear(g2);
+    mpn_ctx_clear(fft_ctx);
+
+    if (f.denom > 1)
+    {
+        ulong inv = nmod_inv(f.denom, mod);
+        _nmod_vec_scalar_mul_nmod(m, m, deg * len, inv, mod);
+    }
+    _fmpz_vec_set_nmod_vec(a, m, deg * len, mod);
+
+    _nmod_vec_clear(m);
+    dirichlet_group_clear(G);
+}
+
+
 int main(int argc, char* argv[])
 {
-    slong N, len;
+    slong i, N, len;
     fmpz * a;
+    const struct mf_eis_desc * f;
 
     if (argc == 3)
     {
@@ -377,31 +389,36 @@ int main(int argc, char* argv[])
 
     if (argc != 3 || len < 1)
     {
-        flint_printf("Syntax: mfcoefs <level> <length>\n");
+        flint_printf("mfcoefs <level> <length>\n");
         flint_printf("where <length> is the (positive) number of terms to compute\n");
         return EXIT_FAILURE;
     }
 
-    a = _fmpz_vec_init(len);
-
     if (N == 11)
-        _fmpz_modular_form_expansion(a, len, f11);
+        f = &f11;
     else if (N == 31)
-        _fmpz_modular_form_expansion(a, len, f31);
+        f = &f31;
     else if (N == 61)
-        _fmpz_modular_form_expansion(a, len, f61);
+        f = &f61;
     else
         return EXIT_FAILURE;
 
-    if (len < 1000)
+    a = _fmpz_vec_init(len * f->degy);
+
+    _fmpz_mat_modular_form_expansion(a, f->degy, len, *f);
+
+    for (i = 0; i < f->degy; i++)
     {
-        _fmpz_vec_print(a, len); flint_printf("\n");
-    }
-    else
-    {
-        _fmpz_vec_print(a, 100); flint_printf(" [...] \n");
-        _fmpz_vec_print(a + len - 101, 100); flint_printf("\n");
+        if (len < 1000)
+        {
+            _fmpz_vec_print(a + i * len, len); flint_printf("\n");
+        }
+        else
+        {
+            _fmpz_vec_print(a + i * len, 100); flint_printf(" [...] \n");
+            _fmpz_vec_print(a + (i+1)*len - 101, 100); flint_printf("\n");
+        }
     }
 
-    _fmpz_vec_clear(a, len);
+    _fmpz_vec_clear(a, len * f->degy);
 }
