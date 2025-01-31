@@ -2,6 +2,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include "ulong_extras.h"
 #include "nmod_vec.h"
 #include "nmod_poly.h"
@@ -12,38 +13,31 @@
 #include "dirichlet.h"
 #include "profiler.h"
 
-/* fast computation of modular forms coefficients.
-   Use precomputed representation as Eisenstein series */
+/* fast computation of modular forms coefficients via
+   representation as products of Eisenstein series */
 
-/* modular form expression via Eisenstein series */
-
+/* data format */
 struct mf_eis_desc {
-    const slong N;
-    const slong nchi;
-    const slong * chi;   /* nchi values mod N */
+    const slong N;       /* level */
+    const slong nchi;    /* number of characters */
+    const slong * chi;   /* character index mod N */
 
-    const slong degy;    /* components of final result */
-    const slong * poly;  /* hecke field coefficients */
+    const slong degy;    /* degree of Hecke field */
+    const slong * poly;  /* coefficients of Hecke polynomial */
 
     const slong denom;   /* denominator of integral basis */
-    const slong * basis; /* integral basis mod poly */
+    const slong * basis; /* denom * integral basis mod poly */
 
     const slong ord;     /* order of root of unity */
     const ulong modp;    /* fft prime used for expression */
     const ulong z;       /* root of unity for character */
 
     const ulong * E0;    /* (1+2*nchi) constant values of E1(chi)*denom */
-    const ulong * coefs; /* (1+nchi) * degy values mod modp */
+    const ulong * coefs; /* (1+nchi) * degy values */
 };
 
 /* [[1, 10], t - 1, [Mod(-1, t + 1), 2], [[1/2], [1/2]], [-3/2, 5/2]] */
 const struct mf_eis_desc f11 = {
-    //11, 1, (const slong[]){ 10 },
-    //1, (const slong[]) { 0 },
-    //1, 1, 1,
-    //2,
-    //(const slong[]){ 1 , 1},
-    //(const slong[]){ -3, 5 }
     11, 1, (const slong[]){ 10 },
     1, (const slong[]){ -1 },
     1, (const slong[]){ 1 },
@@ -52,13 +46,21 @@ const struct mf_eis_desc f11 = {
     (const ulong[]){ 464142083293183,464142083293187 }
 };
 /* [[1, 30, 6], y^2 - y - 1, [Mod(t, t^2 - t + 1), 6], [[3/2], [3/2], [Mod(-t + 2, t^2 - t + 1)], [Mod(t + 1, t^2 - t + 1)]], [-7/2, 3/2, 1/6, 1/2, 4/3, -1]] */
-const struct mf_eis_desc f31 = { // [3/2*y - 7/2, 1/2*y + 1/6, -y + 4/3]
+const struct mf_eis_desc f31 = {
     31, 2, (const slong[]){ 30,6 },
     2, (const slong[]){ -1,-1 },
     1, (const slong[]){ 1,0,0,1 },
     6, 905789275373569, 644816079264124,
     (const ulong[]){ 452894637686786,452894637686786,260973196109447,644816079264125 },
     (const ulong[]){ 452894637686781,452894637686786,754824396144641,452894637686785,603859516915714,905789275373568 }
+};
+const struct mf_eis_desc f41 = {
+    41, 3, (const slong[]){ 6,11,12 },
+    3, (const slong[]){ 1,-3,-1 },
+    1, (const slong[]){ 1,0,0,0,1,0,-2,-1,1 },
+    40, 701110461399041, 333528560633536,
+    (const ulong[]){ 10142675051358,634276190715230,200445333534371,362521505263931,30120745228717,83359389192523 },
+    (const ulong[]){ 651935045203970,189937766088661,75213627444255,652265349828826,89867627768272,374492331514933,235506004769279,641214652205753,550946488486603,22558616175853,297404142763531,262119416116891 }
 };
 const struct mf_eis_desc f61 = {
     61, 3, (const slong[]){ 11,21,29 },
@@ -67,6 +69,22 @@ const struct mf_eis_desc f61 = {
     12, 870980712923137, 257862092299764,
     (const ulong[]){ 273795779685211,597184933237927,392035617143803,671280126826147,155555942226619,523089739649707 },
     (const ulong[]){ 0,435490356461568,0,290326904307713,145163452153856,580653808615424,322382742815514,580653808615425,177219290661658,258271065799910,580653808615425,113107613646054 }
+};
+const struct mf_eis_desc f71a = {
+    71, 7, (const slong[]){ 7,11,13,21,22,28,31 },
+    3, (const slong[]){ 3,-4,-1 },
+    1, (const slong[]){ 1,0,0,0,1,0,-3,0,1 },
+    70, 629405982392321, 572721821061360,
+    (const ulong[]){ 612471369210901,455867749289539,108698314513158,96673726526157,96673726526157,108698314513158,446802661499588,413959034958878,415732848117381,542245486617848,30232143737464,156691819751119,606911939660585,364854086294683 },
+    (const ulong[]){ 437974089047981,388095042878010,412840827405281,261353642983072,309570413957117,39124081025721,285986275923297,320862605152511,266276963339843,0,0,0,230021885951576,307877298111043,262276744196545,521380931629118,51528997944652,297089871816528,302286269364367,338009085225644,196481807143539,166755548574061,414635124308152,399163615427558 }
+};
+const struct mf_eis_desc f71b = {
+    71, 7, (const slong[]){ 7,11,13,21,22,28,31 },
+    3, (const slong[]){ 3,-4,-1 },
+    1, (const slong[]){ 1,0,0,0,1,0,-3,0,1 },
+    70, 688859067187201, 349430710089241,
+    (const ulong[]){ 518828945685376,678679570084347,600205339446781,512464146340040,512464146340040,600205339446781,152341172025593,670415589327988,366649138525788,141096975277319,90062042408751,125267984386595,369543698526164,658211058226745 },
+    (const ulong[]){ 459226758852241,297595264422605,621858495454594,228813119886382,582000440007093,572174813428920,293426901675181,667228308729419,244216972294607,0,0,0,554815117878138,497661732830562,101140114261326,340812530288534,340217578802933,70232596122992,284688177431564,669659968814095,411761714098747,678038688998246,178863159143802,495711483528778 }
 };
 const struct mf_eis_desc f131 = {
     131, 10, (const slong[]){ 130,2,8,10,14,17,22,23,26,29 },
@@ -300,35 +318,27 @@ _fmpz_mat_modular_form_expansion(fmpz * a, slong deg, slong len, const struct mf
 
 int main(int argc, char* argv[])
 {
-    slong i, N, len;
+    slong i, len;
     fmpz * a;
-    const struct mf_eis_desc * f;
+    slong count = 7;
+    const char * mf_name[]       = { "11", "31", "41", "61", "71a", "71b", "131" };
+    const struct mf_eis_desc *f, mf[] = { f11 , f31 , f41 , f61 , f71a , f71b , f131  };
 
     if (argc == 3)
     {
-        N = atol(argv[1]);
+        for (i = 0; i < count; i++)
+           if (strcmp(argv[1], mf_name[i])==0)
+               break;
+        f = mf + i;
         len = atol(argv[2]);
     }
 
-    if (argc != 3 || len < 1)
+    if (argc != 3 || len < 1 || i >= count)
     {
         flint_printf("mfcoefs <level> <length>\n");
         flint_printf("where <length> is the (positive) number of terms to compute\n");
         return EXIT_FAILURE;
     }
-
-    if (N == 11)
-        f = &f11;
-    else if (N == 31)
-        f = &f31;
-    else if (N == 61)
-        f = &f61;
-    else if (N == 131)
-        f = &f131;
-    //else if (N == 983)
-    //    f = &f983;
-    else
-        return EXIT_FAILURE;
 
     a = _fmpz_vec_init(len * f->degy);
 
