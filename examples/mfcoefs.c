@@ -322,21 +322,31 @@ int main(int argc, char* argv[])
     fmpz * a;
     slong count = 7;
     const char * mf_name[]       = { "11", "31", "41", "61", "71a", "71b", "131" };
-    const struct mf_eis_desc *f, mf[] = { f11 , f31 , f41 , f61 , f71a , f71b , f131  };
+    const struct mf_eis_desc *f = NULL, mf[] = { f11 , f31 , f41 , f61 , f71a , f71b , f131  };
+    int out_lines = 0;
 
-    if (argc == 3)
+    /* options */
+    for (i = 1; i < argc;)
     {
-        for (i = 0; i < count; i++)
-           if (strcmp(argv[1], mf_name[i])==0)
-               break;
-        f = mf + i;
-        len = atol(argv[2]);
+        if (strcmp(argv[i], "--lines") == 0)
+            out_lines = 1, i++;
+        else break;
     }
 
-    if (argc != 3 || len < 1 || i >= count)
+    if (argc == i + 2)
     {
-        flint_printf("mfcoefs <level> <length>\n");
-        flint_printf("where <length> is the (positive) number of terms to compute\n");
+        slong j;
+        for (j = 0; j < count; j++)
+           if (strcmp(argv[i], mf_name[j]) == 0)
+               break;
+        f = mf + j;
+        len = atol(argv[i+1]);
+    }
+
+    if (argc != i + 2 || len < 1 || f == NULL)
+    {
+        flint_printf("mfcoefs {--lines} <level> <length>\n");
+        flint_printf("where <length> is the number of terms to compute\n");
         return EXIT_FAILURE;
     }
 
@@ -344,16 +354,37 @@ int main(int argc, char* argv[])
 
     _fmpz_mat_modular_form_expansion(a, f->degy, len, *f);
 
-    for (i = 0; i < f->degy; i++)
+    if (out_lines)
     {
-        if (len < 1000)
+        slong j;
+        for (j = 0; j < len; j++)
         {
-            _fmpz_vec_print(a + i * len, len); flint_printf("\n");
+            flint_printf("[ "); fmpz_print(a + j);
+            for (i = 1; i < f->degy; i++)
+            {
+                flint_printf(", ");
+                fmpz_print(a + j + i * len);
+            }
+            flint_printf("]\n");
         }
-        else
+    }
+    else
+    {
+        for (i = 0; i < f->degy; i++)
         {
-            _fmpz_vec_print(a + i * len, 100); flint_printf(" [...] \n");
-            _fmpz_vec_print(a + (i+1)*len - 101, 100); flint_printf("\n");
+            if (out_lines)
+            {
+
+            }
+            else if (len < 1000)
+            {
+                _fmpz_vec_print(a + i * len, len); flint_printf("\n");
+            }
+            else
+            {
+                _fmpz_vec_print(a + i * len, 100); flint_printf(" [...] \n");
+                _fmpz_vec_print(a + (i+1)*len - 101, 100); flint_printf("\n");
+            }
         }
     }
 
