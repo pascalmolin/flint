@@ -236,9 +236,19 @@ _nmod_poly_euler_product(nn_ptr z, slong len, _nmod_euler_func_t factor, void * 
     n_primes_clear(iter);
 }
 
-/* output coefficients on integral basis, first deg coefficients */
+typedef struct {
+    slong count_euler;
+    slong count_prod;
+    slong cpu_euler;
+    slong wall_euler;
+    slong cpu_prod;
+    slong wall_prod;
+} mf_timer_t[1];
+
+/* matrix of modular form coefficients modulo f.modp,
+   one column per coefficient expressed on integral basis */
 void
-nmod_mat_modular_form_expansion(nmod_mat_t a, slong deg, slong len, const struct mf_eis_desc f)
+nmod_mat_modular_form_expansion(nmod_mat_t a, slong deg, slong len, const struct mf_eis_desc f, mf_timer_t timer)
 {
     nmod_t mod;
     dirichlet_group_t G;
@@ -246,6 +256,7 @@ nmod_mat_modular_form_expansion(nmod_mat_t a, slong deg, slong len, const struct
     const ulong * coefs = f.coefs;
     nn_ptr g, g0, g1, g2, g12;
     mpn_ctx_t fft_ctx;
+    timeit_t t;
 
     FLINT_ASSERT(deg <= f.degy && deg == nmod_mat_nrows(a));
     FLINT_ASSERT(len == nmod_mat_ncols(a));
@@ -261,6 +272,10 @@ nmod_mat_modular_form_expansion(nmod_mat_t a, slong deg, slong len, const struct
     mpn_ctx_init(fft_ctx, mod.n);
 
     /* initialize with E_2(1 mod N), no constant term */
+
+    if (timer)
+        timeit_start(t);
+
     g0 = _nmod_vec_init(len);
     g0[0] = 0;
     _nmod_poly_euler_product(g0, len, _nmod_euler_factor_E2_1N, (void *)f.N, mod);
@@ -272,6 +287,14 @@ nmod_mat_modular_form_expansion(nmod_mat_t a, slong deg, slong len, const struct
     }
     _nmod_vec_clear(g0);
 
+    if (timer)
+    {
+        timeit_stop(t);
+        timer->count_euler += 1;
+        timer->cpu_euler += t->cpu;
+        timer->wall_euler += t->wall;
+    }
+
     /* add products c[k] * E1(chi[k]) * E1(chi[k]^-1) */
     dirichlet_group_init(G, f.N);
     g1 = _nmod_vec_init(len);
@@ -281,34 +304,43 @@ nmod_mat_modular_form_expansion(nmod_mat_t a, slong deg, slong len, const struct
     {
         mf_eis_ctx_t ctx;
 
-        TIMEIT_ONCE_START
-        flint_printf("[ char %ld ]\n",k+1);
-        mf_eis_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
-        TIMEIT_ONCE_STOP
+        /* Eisenstein expansions g1 and g2 = conj(g1) */
+        if (timer)
+            timeit_start(t);
 
-        TIMEIT_ONCE_START
-        flint_printf("##    euler g1...");
+        mf_eis_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
+
         g1[0] = nmod_set_ui(f.E0[2*k], mod);
         _nmod_poly_euler_product(g1, len, _nmod_euler_factor_E1_chi, ctx, mod);
-        flint_printf("[done]\n");
-        TIMEIT_ONCE_STOP
 
-        TIMEIT_ONCE_START
-        flint_printf("##    euler g2...");
         mf_eis_ctx_dual(ctx, mod);
         g2[0] = nmod_set_ui(f.E0[2*k+1], mod);
         _nmod_poly_euler_product(g2, len, _nmod_euler_factor_E1_chi, ctx, mod);
-        flint_printf("[done]\n");
-        TIMEIT_ONCE_STOP
 
         mf_eis_ctx_clear(ctx);
 
-        TIMEIT_ONCE_START
-        flint_printf("           fft mul g1 * g2...");
+        if (timer)
+        {
+            timeit_stop(t);
+            timer->count_euler += 2;
+            timer->cpu_euler += t->cpu;
+            timer->wall_euler += t->wall;
+        }
+
+        /* product g12 = g1 * g2 */
+        if (timer)
+            timeit_start(t);
+
         _nmod_poly_mul_mid_mpn_ctx(g12, 0, len, g1, len, g2, len, mod, fft_ctx);
         g12[0] = 0;
-        flint_printf("[done]\n");
-        TIMEIT_ONCE_STOP
+
+        if (timer)
+        {
+            timeit_stop(t);
+            timer->count_prod += 1;
+            timer->cpu_prod += t->cpu;
+            timer->wall_prod += t->wall;
+        }
 
         coefs += f.degy;
         for (i = 0, g = a->entries; i < deg; g += a->stride, i++)
@@ -364,7 +396,7 @@ int usage(int count, const char * fname[])
     flint_printf("output coefficients as a matrix, one row per coefficient a_p,");
     flint_printf(" columns indexed by an integral basis of the value field\n");
     flint_printf("options:\n");
-    flint_printf(" --lines: one line per coefficient instead of matrix\n");
+    flint_printf(" --raw: raw flint output (matrix size followed by space separated values)\n");
     flint_printf(" --all: all coefficients a_n (default only a_p)\n");
     flint_printf(" --tail <n>: output only last <n> coefficients (implies --all)\n");
     flint_printf(" --time: time each step (implies --tail 0)\n");
@@ -382,6 +414,8 @@ int main(int argc, char * argv[])
     const struct mf_eis_desc *f = NULL, mf[] = { f11 , f31 , f41 , f61 , f71a , f71b , f131  };
     int opt_all = 0, opt_raw = 0, opt_time = 0;
     long opt_tail = -1;
+    timeit_t total_time;
+    mf_timer_t timer;
 
     /* options */
     for (i = 1; i < argc;)
@@ -397,7 +431,15 @@ int main(int argc, char * argv[])
         else break;
     }
 
-    if (opt_time) opt_tail = 0;
+    if (opt_time) {
+        opt_tail = 0;
+        timer->count_euler = 0;
+        timer->count_prod = 0;
+        timer->cpu_euler = 0;
+        timer->wall_euler = 0;
+        timer->cpu_prod = 0;
+        timer->wall_prod = 0;
+    }
     if (opt_tail >= 0) opt_all = 1;
 
     /* form and length */
@@ -414,8 +456,15 @@ int main(int argc, char * argv[])
     if (argc != i + 2 || len < 1 || f == NULL)
         return usage(count, mf_name);
 
+    timeit_start(total_time);
+
     nmod_mat_init(a, f->degy, len, f->modp);
-    nmod_mat_modular_form_expansion(a, f->degy, len, *f);
+    if (opt_time)
+        nmod_mat_modular_form_expansion(a, f->degy, len, *f, timer);
+    else
+        nmod_mat_modular_form_expansion(a, f->degy, len, *f, NULL);
+
+    timeit_stop(total_time);
 
     if (opt_tail != 0)
     {
@@ -443,4 +492,12 @@ int main(int argc, char * argv[])
 
         fmpz_mat_clear(m);
     }
+
+    if (opt_time)
+    {
+        flint_printf("euler (x%ld) cpu = %wd ms  wall = %wd ms\n", timer->count_euler, timer->cpu_euler, timer->wall_euler);
+        flint_printf("prod  (x%ld) cpu = %wd ms  wall = %wd ms\n", timer->count_prod, timer->cpu_prod, timer->wall_prod);
+        flint_printf("total cpu = %wd ms  wall = %wd ms\n", total_time->cpu, total_time->wall);
+    }
+
 }
