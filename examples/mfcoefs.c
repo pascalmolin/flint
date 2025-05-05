@@ -236,6 +236,52 @@ _nmod_poly_euler_product(nn_ptr z, slong len, _nmod_euler_func_t factor, void * 
     n_primes_clear(iter);
 }
 
+/* use precomputed smoothed table */
+typedef struct {
+    slong m;
+    slong pe;
+} smooth_t;
+void
+smooth_table_init(smooth_t * tab, slong size, slong len)
+{
+    slong p, m;
+    n_primes_t iter;
+    n_primes_init(iter);
+    for (m = 0; m < len; m++)
+        tab[m].m = 0;
+    tab[1].m = 1; tab[1].pe = 1;
+    for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
+    {
+        slong pe, pem, r;
+        for (pe = p; pe < len; pe *= p)
+            for (m = 1, pem = pe; pem < len; m++, pem += pe)
+                for(r = 1; r < p && pem < len; m++, pem += pe, r++)
+                    if (tab[m].m) tab[pem].m = m, tab[pem].pe = pe;
+    }
+    n_primes_clear(iter);
+}
+
+void
+_nmod_poly_euler_product_precomp(nn_ptr z, slong len, _nmod_euler_func_t factor, void * ctx, smooth_t * tab, nmod_t mod)
+{
+    slong p, pem;
+    ulong fp[30];
+    n_primes_t iter;
+    n_primes_init(iter);
+    for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
+    {
+        slong deg = n_flog(len, p), e, pe;
+        factor(fp, deg, p, ctx, mod);
+        for (e = 1, pe = p; pe < len; e++, pe *= p)
+            z[pe] = fp[e];
+    }
+    for (pem = 2; pem < len; pem++)
+    {
+        slong m = tab[pem].m, pe = tab[pem].pe;
+        z[pem] = nmod_mul(z[m], z[pe], mod);
+    }
+}
+
 typedef struct {
     slong count_euler;
     slong count_prod;
