@@ -226,7 +226,6 @@ _nmod_poly_set_euler_factor_fill_large(nn_ptr z, slong len, slong p, nmod_t mod)
     for (m = 1, pm = p; pm < len; m++, pm += p)
         z[pm] = nmod_mul(z[m], ap, mod);
 }
-/* first Euler factors, then propagate */
 /* use precomputed smoothed table */
 typedef struct {
     slong m;
@@ -235,7 +234,32 @@ typedef struct {
 typedef smooth_struct * smooth_ptr;
 typedef const smooth_ptr smooth_srcptr;
 
+/* store complete table of smooth numbers less than len */
+void
+smooth_table_init(smooth_ptr tab, slong size, slong len)
+{
+    slong p, m;
+    n_primes_t iter;
+    n_primes_init(iter);
+    for (m = 0; m < len; m++)
+        tab[m].m = tab[m].pe = 0;
+    tab[1].m = tab[1].pe = 1;
+    /* TODO: could optimize */
+    for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
+    {
+        slong pe, pem, r;
+        for (pe = p; pe < len; pe *= p)
+            for (m = 1, pem = pe; pem < len; m++, pem += pe)
+                for(r = 1; r < p && pem < len; m++, pem += pe, r++)
+                    if (tab[m].m) tab[pem].m = m, tab[pem].pe = pe;
+    }
+    n_primes_clear(iter);
+}
 
+/* compute pmax-smooth numbers less than len, return size */
+
+
+/* first Euler factors, then propagate */
 void
 _nmod_poly_euler_product_steps(nn_ptr z, slong len, _nmod_euler_func_t factor, void * ctx, smooth_srcptr tab, nmod_t mod)
 {
@@ -288,28 +312,6 @@ _nmod_poly_set_euler_fill_smooth(nn_ptr z, slong len, smooth_ptr tab, slong size
         slong m = tab[i].m, pe = tab[i].pe;
         z[pe*m] = nmod_mul(z[pe], z[m], mod);
     }
-}
-
-/* store complete table of smooth numbers less than len */
-void
-smooth_table_init(smooth_ptr tab, slong size, slong len)
-{
-    slong p, m;
-    n_primes_t iter;
-    n_primes_init(iter);
-    for (m = 0; m < len; m++)
-        tab[m].m = tab[m].pe = 0;
-    tab[1].m = tab[1].pe = 1;
-    /* TODO: could optimize */
-    for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
-    {
-        slong pe, pem, r;
-        for (pe = p; pe < len; pe *= p)
-            for (m = 1, pem = pe; pem < len; m++, pem += pe)
-                for(r = 1; r < p && pem < len; m++, pem += pe, r++)
-                    if (tab[m].m) tab[pem].m = m, tab[pem].pe = pe;
-    }
-    n_primes_clear(iter);
 }
 
 void
@@ -825,6 +827,7 @@ int main(int argc, char * argv[])
 
     if (opt_test)
     {
+        /* just timings */
         smooth_ptr tab;
 
         timeit_start(total_time);
