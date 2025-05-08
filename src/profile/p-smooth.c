@@ -36,7 +36,7 @@ smooth_table_init_sieve(smooth_ptr tab, slong pmax, slong len)
         for (pe = p; pe < len; pe *= p)
             for (m = 1, pem = pe; pem < len; m++, pem += pe)
                 for(r = 1; r < p && pem < len; m++, pem += pe, r++)
-                    if (tab[m].m == 0) tab[pem].m = m, tab[pem].pe = pe;
+                    if (tab[pem].m == 0) tab[pem].m = m, tab[pem].pe = pe;
     }
     n_primes_clear(iter);
 }
@@ -52,38 +52,52 @@ smooth_table_init_sieve(smooth_ptr tab, slong pmax, slong len)
 void
 smooth_table_init_mod(smooth_ptr tab, slong pmax, slong len)
 {
-    slong i, m, num, num_primes;
-    ulong mod = 1;
+    slong i, m, num;
+    ulong mod;
     const ulong * prime;
     for (m = 0; m < len; m++)
         tab[m].m = tab[m].pe = 0;
     tab[1].m = tab[1].pe = 1;
 
     num = n_prime_pi(pmax);
-    num_primes = n_prime_pi(len);
-    prime = n_primes_arr_readonly(num_primes);
+    prime = n_primes_arr_readonly(num);
 
+    /* first loop: use modulus */
+    mod = 1;
     for (i = 0; i < num; i++)
+    {
+        slong p, pe, lim;
+        p = prime[i];
+        lim = len / p;
+        if ((mod *= p) > lim) break;
+        for (pe = p; pe < len; pe *= p)
+        {
+            slong m, j = i + 1;
+            slong lim = FLINT_MIN(len / pe, pmax);
+            for (m = 1; m < mod; m = prime[j++])
+            {
+                for (; m < lim; m += mod)
+                {
+                    slong pem = pe * m;
+                    tab[pem].pe = pe, tab[pem].m = m; 
+                }
+            }
+        }
+    }
+    /* no longer need to shift by mod */
+    for (; i < num; i++)
     {
         slong p, pe;
         p = prime[i];
-        mod *= p;
         for (pe = p; pe < len; pe *= p)
         {
-            slong j;
-            ulong m, pem, pemod = pe * mod;
-            /* congruence jumps */
-            m = 1; pem = pe;
-            j = i + 1;
-            do {
-                for (; pem < len; m +=mod, pem += pemod)
-                {
-                    tab[pem].m = m;
-                    tab[pem].pe = pe;
-                }
-                m = prime[j++];
-                pem = pe * m;
-            } while (m < mod && pem < len);
+            slong m, j = i + 1;
+            slong lim = FLINT_MIN(len / pe, pmax);
+            for (m = 1; m < lim; m = prime[j++])
+            {
+                slong pem = pe * m;
+                tab[pem].pe = pe, tab[pem].m = m; 
+            }
         }
     }
     n_cleanup_primes();
@@ -100,8 +114,6 @@ smooth_table_create(slong * size, slong pmax, slong len)
     num = n_prime_pi(pmax);
     num_primes = n_prime_pi(len);
     alloc = len;
-
-    flint_printf("create table of length %wd\n", alloc);
 
     prime = n_primes_arr_readonly(num_primes);
 
@@ -145,7 +157,61 @@ smooth_table_create(slong * size, slong pmax, slong len)
 
     n_cleanup_primes();
 
-    flint_printf("computed table of length %wd\n", t);
+    *size = t;
+    tab = flint_realloc(tab, t * sizeof(smooth_struct));
+    return tab;
+}
+
+/* variant: ignore trivial decompositions p^e*1 and p*q,
+ * and q is prime > sqrt(n)
+ */
+smooth_ptr
+coprime_table_create(slong * size, slong pmax, slong len)
+{
+    slong i, t, num, num_primes, alloc;
+    ulong mod;
+    const ulong * prime;
+    smooth_ptr tab;
+
+    num = n_prime_pi(pmax);
+    num_primes = n_prime_pi(len);
+    alloc = len;
+
+    prime = n_primes_arr_readonly(num_primes);
+
+    t = 0;
+    mod = 1;
+    tab = flint_malloc(alloc * sizeof(smooth_struct));
+    for (i = 0; i < num; i++)
+    {
+        slong p, pe;
+        p = prime[i];
+        mod *= p;
+        for (pe = p; pe < len; pe *= p)
+        {
+            ulong m = 1 + mod, pem = pe*m, pemod = pe * mod;
+            slong j = i + 1;
+            do {
+                for (; pem < len; m += mod, pem += pemod)
+                    tab[t].m = m, tab[t].pe = pe, t++;
+                m = prime[j++];
+                pem = pe * m;
+            } while (m < mod && pem < len);
+        }
+    }
+    for (; 0 && i < num; i++)
+    {
+        slong p, pe;
+        p = prime[i];
+        for (pe = p; pe < len; pe *= p)
+        {
+            ulong m = 1 + mod, pem = pe*m;
+            slong j = i + 1;
+            for (m = 1 + mod, pem = pe*m; pem < len; m = prime[j++], pem=pe*m)
+                tab[t].m = m, tab[t].pe = pe, t++;
+        }
+    }
+    n_cleanup_primes();
 
     *size = t;
     tab = flint_realloc(tab, t * sizeof(smooth_struct));
@@ -274,30 +340,47 @@ int main(int argc, char * argv[])
 
     if (opt_print)
     {
-        slong i, size;
-        smooth_ptr tab1, tab2, tab3;
+        slong i, size4, size5;
+        smooth_ptr tab1, tab2, tab3, tab4, tab5;
 
         len = opt_print;
 
         tab1 = flint_malloc(len * sizeof(smooth_struct));
-        smooth_table_init_sieve(tab1, n_sqrt(len), len);
         tab2 = flint_malloc(len * sizeof(smooth_struct));
-        smooth_table_init_mod(tab2, n_sqrt(len), len);
-        tab3 = smooth_table_create(&size, n_sqrt(len), len);
+        tab3 = flint_malloc(len * sizeof(smooth_struct));
 
-        flint_printf("size: %ld\n", size);
-        for (i = 0; i < 100 && i < size; i++)
+        smooth_table_init_sieve(tab1, len, len);
+        smooth_table_init_sieve(tab2, n_sqrt(len), len);
+        smooth_table_init_mod(tab3, n_sqrt(len), len);
+
+        tab4 = smooth_table_create(&size4, n_sqrt(len), len);
+        tab5 = coprime_table_create(&size5, n_sqrt(len), len);
+
+        flint_printf("size: %ld\n", size4);
+        for (i = 0; i < 100 && i < size4; i++)
         {
-            slong pe = tab3[i].pe, m = tab3[i].m;
+            slong pe = tab4[i].pe, m = tab4[i].m;
             flint_printf("%2ld: %2ld * %2ld \n", pe*m, pe, m);
         }
-        for (i = 1; i < len; i++)
-            flint_printf("%2ld: %2ld * %2ld, %2ld * %2ld \n",
-                    i, tab1[i].pe, tab1[i].m, tab2[i].pe, tab2[i].m);
+        flint_printf("size: %ld\n", size5);
+        for (i = 0; i < 100 && i < size5; i++)
+        {
+            slong pe = tab5[i].pe, m = tab5[i].m;
+            flint_printf("%2ld: %2ld * %2ld \n", pe*m, pe, m);
+        }
+         for (i = 1; i < len; i++)
+            flint_printf("%2ld: %2ld * %2ld,"
+                                "%2ld * %2ld,"
+                                "%2ld * %2ld \n",
+                    i, tab1[i].pe, tab1[i].m,
+                       tab2[i].pe, tab2[i].m,
+                       tab3[i].pe, tab3[i].m);
 
         flint_free(tab1);
         flint_free(tab2);
         flint_free(tab3);
+        flint_free(tab4);
+        flint_free(tab5);
 
         return 0;
     }
@@ -307,7 +390,7 @@ int main(int argc, char * argv[])
     
     for (len = len_min; len < len_max; len <<= 1)
     {
-        timeit_t t1, t2, t3, t4;
+        timeit_t t1, t2, t3, t4, t5;
         slong size;
         smooth_ptr tab;
 
@@ -345,12 +428,18 @@ int main(int argc, char * argv[])
         flint_free(tab);
         timeit_stop(t4);
 
+        /* create mod table */
+        timeit_start(t5);
+        tab = coprime_table_create(&size, n_sqrt(len), len);
+        flint_free(tab);
+        timeit_stop(t5);
 
-        flint_printf("len = %9wd, %s = %3wd, %s = %3wd, %s = %3wd, %s = %3wd ms\n",
+        flint_printf("len = %9wd, %s = %3wd, %s = %3wd, %s = %3wd, %s = %3wd, %s = %3wd ms\n",
                 len, "sieve all", t1->wall,
                      "sieve sqrt", t2->wall,
                      "sieve mod", t3->wall,
-                     "sieve create", t4->wall);
+                     "sieve create", t4->wall,
+                     "coprime create", t5->wall);
 
     }
 }
