@@ -64,20 +64,18 @@ pem_init_rough(pem_ptr tab, slong len)
 {
     slong lim = n_sqrt(len), len1 = len / 2;
     rough_ptr rough = flint_malloc(len1 * sizeof(struct rough));
-    ///* p = 2 can be done separately */
-    //for (m = 1; m < len1; m += 2)
-    //    for (slong e = 1, pem = m << 1; pem < len; pem <<= 1, e++)
-    //        tab[pem].pe = 1<<e, tab[pem].m = m;
-    for (ulong m1 = 0, m = 1; m < len1; m1++, m += 2)
+
+    rough->m = 2;
+    rough->prev = NULL;
+    rough->next = rough + 1;
+    for (ulong m1 = 1, m = 3; m < len; m1++, m += 2)
     {
         rough[m1].m = m;
         rough[m1].prev = rough + m1 - 1;
         rough[m1].next = rough + m1 + 1;
     }
-    rough[0].m = 2;
-    rough[0].prev = rough;
-    rough[len1].m = len;
-    rough[len1].next = NULL;
+    rough[len1 - 1].m = len;
+    rough[len1 - 1].next = NULL;
 
     for (rough_ptr p1 = rough; p1->m < lim; p1 = p1->next)
     {
@@ -91,6 +89,7 @@ pem_init_rough(pem_ptr tab, slong len)
                 slong pem = pe * m1->m;
                 tab[pem].pe = pe;
                 tab[pem].m = m1->m;
+                if (p == 2) continue;
                 /* update links to skip pem */
                 rough_ptr pem1 = rough + (pem>>1);
                 pem1->next->prev = pem1->prev;
@@ -686,7 +685,7 @@ int main(int argc, char * argv[])
         pem_init(tab, len);
         flint_free(tab);
         timeit_stop(t0);
-        flint_printf("len = %9wd, %s = %3wd", len, t0->wall);
+        flint_printf("len = %9wd, %s = %3wd", len, "init", t0->wall);
 
         for (i = 0; i < NUM; i++)
         {
