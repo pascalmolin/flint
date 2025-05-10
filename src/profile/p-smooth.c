@@ -28,7 +28,6 @@ typedef struct {
 typedef smooth_struct * smooth_ptr;
 typedef const smooth_ptr smooth_srcptr;
 
-
 /* factor table */
 typedef struct {
     slong a;
@@ -74,8 +73,6 @@ pem_init_rough(pem_ptr tab, slong len)
         rough[m1].prev = rough + m1 - 1;
         rough[m1].next = rough + m1 + 1;
     }
-    rough[len1 - 1].m = len;
-    rough[len1 - 1].next = NULL;
 
     for (rough_ptr p1 = rough; p1->m < lim; p1 = p1->next)
     {
@@ -102,52 +99,6 @@ pem_init_rough(pem_ptr tab, slong len)
 }
 
 /* can ignore even numbers */
-void
-pem_init_rough_odd(pem_ptr tab, slong len)
-{
-    slong m, len1 = len / 2, len2 = n_sqrt(len) / 2;
-    rough_ptr rough = flint_malloc(len1 * sizeof(struct rough));
-    ///* p = 2 can be done separately */
-    //for (m = 1; m < len1; m += 2)
-    //    for (slong e = 1, pem = m << 1; pem < len; pem <<= 1, e++)
-    //        tab[pem].pe = 1<<e, tab[pem].m = m;
-
-    for (m = 0; m < len1; m++)
-    {
-        rough[m].m = 2*m+1;
-        rough[m].prev = rough + m - 1;
-        rough[m].next = rough + m + 1;
-    }
-    rough[0].prev = rough;
-    /* process even 2^e*odd */
-    /* tab links p-rough odd numbers */
-    for (rough_ptr p1 = rough + 1; p1->m < len2; p1 = p1->next)
-    {
-        slong p = p1->m, pe;
-        for (pe = p; pe < len; pe *= p)
-        {
-            ulong lim = len / pe;
-            /* loop m in p-rough numbers */
-            for (rough_ptr m1 = p1->next; m1->m < lim; m1 = m1->next)
-            {
-                slong pem = pe * m1->m;
-                tab[pem].pe = pe;
-                tab[pem].m = m1->m;
-                /* update links to skip pem */
-                rough_ptr pem1 = rough + (pem / 2);
-                pem1->next->prev = pem1->prev;
-                pem1->prev->next = pem1->next;
-                //prev = rough[pem].prev;
-                //next = rough[pem].next;
-                //rough[prev].next = next;
-                //rough[next].prev = prev;
-            }
-        }
-    }
-    /* rough now links primes > sqrt(len) */
-    flint_free(rough);
-}
-
 /* identify pmax-pem numbers in complete table of numbers less than len */
 void
 pem_init_sieve_upto(pem_ptr tab, slong pmax, slong len)
@@ -158,25 +109,6 @@ pem_init_sieve_upto(pem_ptr tab, slong pmax, slong len)
     for (m = 0; m < len; m++)
         tab[m].m = tab[m].pe = 0;
     tab[1].m = tab[1].pe = 1;
-    ///* do separately p = 2, 3, 5 */
-    //ulong p235[3] = { 2, 3, 5};
-    //ulong m235[3] = { 1, 1, 1};
-    //ulong len235[3] = { len / 2, len / 3, len / 5 };
-    //slong i = 0;
-    //while (1)
-    //{
-    //    ulong pem;
-    //    for (i = 2; i >= 0 && (m235[i] *= p235[i]) > len235[i]; i--);
-    //    if (i < 0) break;
-    //    pem = m235[i];
-    //    for (i++; i < 3; i++) m235[i] = pem;
-    //}
-    //n_primes_jump_after(iter, 5);
-    /* do separately p = 2 */
-    for (ulong pe = 2; pe < len; pe *= 2)
-        for (ulong m = 1, pem = 2; pem < len; m+=2, pem += 2*pe)
-            tab[pem].m = m, tab[pem].pe = pe;
-    n_primes_next(iter);
     for (p = n_primes_next(iter); p < pmax; p = n_primes_next(iter))
     {
         slong pe, pem, r;
@@ -678,6 +610,7 @@ int main(int argc, char * argv[])
     {
         timeit_t t0, t1;
         slong i;
+        double ref;
         pem_ptr tab;
 
         timeit_start(t0);
@@ -686,7 +619,7 @@ int main(int argc, char * argv[])
         flint_free(tab);
         timeit_stop(t0);
         flint_printf("len = %9wd, %s = %3wd", len, "init", t0->wall);
-
+        ref = 1. / (1 + t0->wall);
         for (i = 0; i < NUM; i++)
         {
             const smooth_func f = func[i];
@@ -695,9 +628,9 @@ int main(int argc, char * argv[])
             (f.func)(tab, len);
             flint_free(tab);
             timeit_stop(t1);
-            flint_printf(", %s = %3wd [x%f]", f.name,
-                    t1->wall, t1->wall * 1. / t0->wall);
+            flint_printf(", %s = %3wd [x%1.1lf]",
+                    f.name, t1->wall, t1->wall * ref);
         }
-
+        flint_printf("\n");
     }
 }
