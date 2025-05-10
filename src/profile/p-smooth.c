@@ -129,6 +129,72 @@ pem_init_sieve_sqrt(pem_ptr tab, slong len)
 {
     pem_init_sieve_upto(tab, n_sqrt(len), len);
 }
+/* visit p^e m with m p-smooth */
+void
+pem_init_sieve_smooth(pem_ptr tab, slong len)
+{
+    slong p, m, pmax = n_sqrt(len);
+    char * smooth;
+    n_primes_t iter;
+    n_primes_init(iter);
+
+    smooth = flint_malloc(len * sizeof(char));
+    memset(smooth, 0, len);
+
+    for (m = 0; m < len; m++)
+        tab[m].m = tab[m].pe = 0;
+    smooth[1] = 1;
+    tab[1].m = tab[1].pe = 1;
+    for (p = n_primes_next(iter); p < pmax; p = n_primes_next(iter))
+    {
+        slong pe, pem, r;
+        for (pe = p; pe < len; pe *= p)
+            for (m = 1, pem = pe; pem < len; m++, pem += pe)
+                for(r = 1; r < p && pem < len; m++, pem += pe, r++)
+                    if (smooth[m])
+                    {
+                        tab[pem].m = m, tab[pem].pe = pe;
+                        smooth[pem] = 1;
+                    }
+    }
+    n_primes_clear(iter);
+    flint_free(smooth);
+}
+
+void
+pem_init_sieve_smooth2(pem_ptr tab, slong len)
+{
+    slong p, m, pmax = n_sqrt(len);
+    char * smooth;
+    n_primes_t iter;
+
+    smooth = flint_malloc(len * sizeof(char));
+    memset(smooth, 0, len);
+
+    for (m = 0; m < len; m++)
+        tab[m].m = tab[m].pe = 0;
+    smooth[1] = 1;
+    tab[1].m = tab[1].pe = 1;
+
+    n_primes_init(iter);
+    for (p = n_primes_next(iter); p < pmax; p = n_primes_next(iter))
+    {
+        slong m = 1, pm = p;
+        do {
+            slong pe, pem;
+            for (; pm < len && !smooth[m]; m++, pm+=p)
+            /* by definition of smooth m is not divisible by p */
+            for (pe = p, pem = pm; pem < len; pem *= p, pe *= p)
+            {
+                smooth[pem] = 1;
+                tab[pem].m = m;
+                tab[pem].pe = pe;
+            }
+        } while (pm < len);
+    }
+    n_primes_clear(iter);
+    flint_free(smooth);
+}
 /* set n=pe*m with smallest p */ 
 /* all even numbers, ie 2^e * (1 mod 2)
  * then all 3^e * prime to 2*3 = 6, ie 1, 5 mod 6.
@@ -202,7 +268,7 @@ pem_init_mod(pem_ptr tab, slong pmax, slong len)
 /* compute only non trivial factorizations k=p^em,
    p smallest prime factor */
 void
-pem_table_init_mod_strict(pem_ptr tab, slong len)
+pem_init_mod_strict(pem_ptr tab, slong len)
 {
     slong i, m, num;
     ulong mod;
@@ -228,15 +294,25 @@ pem_table_init_mod_strict(pem_ptr tab, slong len)
             slong lim1 = len / pe; /* max value for cofactor m */
             slong qmax = FLINT_MIN(mod, lim1);
             ulong pem;
+            /* numbers = 1 mod mod */
             for (m = len + 1, pem = pe * m; m <= lim1; m += mod, pem += pemod)
                 tab[pem].pe = pe, tab[pem].m = m; 
 
-            for (m = prime[j++]; m <= qmax; m = prime[j++])
-            //for (m = 1; m <= qmax; m = prime[j++])
-            {
-                ulong pem = pe * m;
-                for (; m <= lim1; m += mod, pem += pemod)
-                    tab[pem].pe = pe, tab[pem].m = m; 
+            if (p <= 7) {
+              for (m = prime[j++]; m <= qmax; m = prime[j++])
+              //for (m = 1; m <= qmax; m = prime[j++])
+              {
+                  ulong pem = pe * m;
+                  for (; m <= lim1; m += mod, pem += pemod)
+                      tab[pem].pe = pe, tab[pem].m = m; 
+              }
+            } else {
+              for (m = prime[j++]; m <= qmax; m += 2)
+              {
+                  ulong pem = pe * m;
+                  for (; m <= lim1; m += mod, pem += pemod)
+                      tab[pem].pe = pe, tab[pem].m = m; 
+              }
             }
         }
     }
@@ -248,13 +324,10 @@ pem_table_init_mod_strict(pem_ptr tab, slong len)
         for (pe = p; pe < len; pe *= p)
         {
             slong m, j = i + 1;
+            slong pem, dpe = 2*pe;
             slong lim = len / pe;
-            for (m = prime[j++]; m <= lim; m = prime[j++])
-            //for (m = 1; m <= lim; m = prime[j++])
-            {
-                slong pem = pe * m;
+            for (m = prime[j++], pem = pe*m; m <= lim; m += 2, pem += dpe)
                 tab[pem].pe = pe, tab[pem].m = m; 
-            }
         }
     }
     n_cleanup_primes();
@@ -554,10 +627,13 @@ int main(int argc, char * argv[])
     int opt_min = 15, opt_max = 28;
     slong opt_print = 0;
 
-#define NUM 3
+#define NUM 6
     const smooth_func func[NUM] = {
         (const smooth_func){ "all", &pem_init_sieve_all },
         (const smooth_func){ "sqrt", &pem_init_sieve_sqrt },
+        (const smooth_func){ "mod", &pem_init_mod_strict },
+        (const smooth_func){ "smooth", &pem_init_sieve_smooth },
+        (const smooth_func){ "smooth2", &pem_init_sieve_smooth2 },
         (const smooth_func){ "rough", &pem_init_rough }
     };
 
@@ -584,9 +660,13 @@ int main(int argc, char * argv[])
             tab[i] = flint_malloc(len * sizeof(pem_struct));
             (func[i].func)(tab[i], len);
         }
+        flint_printf("index");
+        for (i = 0; i < NUM; i++)
+            flint_printf("  #  %9s", func[i].name);
+        flint_printf("\n");
         for (j = 1; j < len; j++)
         {
-            flint_printf("%2ld:", j);
+            flint_printf("%5ld", j);
             for (i = 0; i < NUM; i++)
             {
                 pem_struct pem = tab[i][j];
