@@ -58,12 +58,14 @@ pem_init(pem_ptr tab, slong len)
         tab[k].pe = 1, tab[k].m = k;
 }
 
+/* assume tab has been inited */
 void
 pem_init_rough_lim(pem_ptr tab, slong lim, slong len)
 {
     slong len1 = len / 2;
-    rough_ptr rough = flint_malloc(len1 * sizeof(struct rough));
+    rough_ptr rough;
 
+    rough = flint_malloc(len1 * sizeof(struct rough));
     rough->m = 2;
     rough->prev = NULL;
     rough->next = rough + 1;
@@ -101,12 +103,14 @@ pem_init_rough_lim(pem_ptr tab, slong lim, slong len)
 void
 pem_init_rough(pem_ptr tab, slong len)
 {
+    pem_init(tab, len);
     pem_init_rough_lim(tab, n_sqrt(len), len);
 }
 
 void
 pem_init_rough_all(pem_ptr tab, slong len)
 {
+    pem_init(tab, len);
     pem_init_rough_lim(tab, len-1, len);
 }
 /* can ignore even numbers */
