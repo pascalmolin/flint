@@ -173,24 +173,53 @@ pem_init_sieve_smooth2(pem_ptr tab, slong len)
 
     for (m = 0; m < len; m++)
         tab[m].m = tab[m].pe = 0;
-    smooth[1] = 1;
     tab[1].m = tab[1].pe = 1;
+    smooth[1] = 1;
 
     n_primes_init(iter);
+    p = n_primes_next(iter);
+    for (ulong pe = 2; pe < len; pe *= 2)
+        tab[pe].pe = pe, tab[pe].m = 1, smooth[pe] = 1;
     for (p = n_primes_next(iter); p < pmax; p = n_primes_next(iter))
     {
-        slong m = 1, pm = p;
-        do {
-            slong pe, pem;
-            for (; pm < len && !smooth[m]; m++, pm+=p)
+        ulong m, pm;
+        /* We must take care: m must be strictly p-smooth in
+         * this loop but we declare p-smooth numbers at the
+         * same time.
+         * This is not a big issue when we loop on p^e then on
+         * m, since the last decomposition written is the good
+         * one (p^e maximal).
+         * When reversing the loops we must loop backwards on m
+         * to solve the problem. */
+        ulong e, pe[32], lim[32];
+        pe[0] = p;
+        /* precompute valid exponents */
+        for (e = 0; pe[e] < len; e++)
+        {
+            lim[e] = len / pe[e];
+            pe[e+1] = pe[e] * p;
+        }
+        lim[e] = 0;
+        /* loop */
+        for (m = lim[0], pm = p*m; m; m--, pm-=p)
+        {
+            for (; pm && !smooth[m]; m--, pm-=p)
             /* by definition of smooth m is not divisible by p */
-            for (pe = p, pem = pm; pem < len; pem *= p, pe *= p)
+            smooth[pm] = 1;
+            tab[pm].m = m;
+            tab[pm].pe = p;
+            for (e = 1; m < lim[e]; e++)
             {
-                smooth[pem] = 1;
-                tab[pem].m = m;
-                tab[pem].pe = pe;
+               ulong pem = pe[e]*m;
+               tab[pem].m = m;
+               tab[pem].pe = pe[e];
             }
-        } while (pm < len);
+        }
+        /* set smooth p^e last */
+        for (e = 0; lim[e]; e++)
+        {
+            smooth[pe[e]] = 1;
+        }
     }
     n_primes_clear(iter);
     flint_free(smooth);
@@ -622,9 +651,8 @@ typedef struct {
 
 int main(int argc, char * argv[])
 {
-    slong i, len;
-    ulong len_min, len_max;
-    int opt_min = 15, opt_max = 28;
+    slong i;
+    int e, opt_min = 15, opt_max = 28;
     slong opt_print = 0;
 
 #define NUM 6
@@ -651,7 +679,7 @@ int main(int argc, char * argv[])
 
     if (opt_print)
     {
-        slong i, j;
+        slong i, j, len;
         pem_ptr tab[NUM];
         len = opt_print;
 
@@ -662,7 +690,7 @@ int main(int argc, char * argv[])
         }
         flint_printf("index");
         for (i = 0; i < NUM; i++)
-            flint_printf("  #  %9s", func[i].name);
+            flint_printf("  # %8s   ", func[i].name);
         flint_printf("\n");
         for (j = 1; j < len; j++)
         {
@@ -683,13 +711,14 @@ int main(int argc, char * argv[])
         return 0;
     }
 
-    len_min = 1UL << opt_min;
-    len_max = 1UL << opt_max;
-    
-    for (len = len_min; len < len_max; len <<= 1)
+    flint_printf("2^k# none");
+    for (i = 0; i < NUM; i++)
+        flint_printf(" #  %8s ", func[i].name);
+    flint_printf("\n");
+    for (e = opt_min; e <= opt_max; e++)
     {
         timeit_t t0, t1;
-        slong i;
+        slong i, len = 1UL<<e;
         double ref;
         pem_ptr tab;
 
@@ -698,7 +727,7 @@ int main(int argc, char * argv[])
         pem_init(tab, len);
         flint_free(tab);
         timeit_stop(t0);
-        flint_printf("len = %9wd, %s = %3wd", len, "init", t0->wall);
+        flint_printf("%2d # %4wd", e, t0->wall);
         ref = 1. / (1 + t0->wall);
         for (i = 0; i < NUM; i++)
         {
@@ -708,8 +737,7 @@ int main(int argc, char * argv[])
             (f.func)(tab, len);
             flint_free(tab);
             timeit_stop(t1);
-            flint_printf(", %s = %3wd [x%1.1lf]",
-                    f.name, t1->wall, t1->wall * ref);
+            flint_printf(" # %4wd [%2.1f]", t1->wall, t1->wall * ref);
         }
         flint_printf("\n");
     }
