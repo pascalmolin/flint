@@ -59,9 +59,9 @@ pem_init(pem_ptr tab, slong len)
 }
 
 void
-pem_init_rough(pem_ptr tab, slong len)
+pem_init_rough_lim(pem_ptr tab, slong lim, slong len)
 {
-    slong lim = n_sqrt(len), len1 = len / 2;
+    slong len1 = len / 2;
     rough_ptr rough = flint_malloc(len1 * sizeof(struct rough));
 
     rough->m = 2;
@@ -94,46 +94,57 @@ pem_init_rough(pem_ptr tab, slong len)
             }
         }
     }
-    /* rough now links primes > sqrt(len) */
+    /* if lim = sqrt(len), rough now links primes > lim */
     flint_free(rough);
 }
 
+void
+pem_init_rough(pem_ptr tab, slong len)
+{
+    pem_init_rough_lim(tab, n_sqrt(len), len);
+}
+
+void
+pem_init_rough_all(pem_ptr tab, slong len)
+{
+    pem_init_rough_lim(tab, len-1, len);
+}
 /* can ignore even numbers */
 /* identify pmax-pem numbers in complete table of numbers less than len */
 void
-pem_init_sieve_upto(pem_ptr tab, slong pmax, slong len)
+pem_init_sieve_range(pem_ptr tab, slong pmin, slong pmax, slong len)
 {
     slong p, m;
     n_primes_t iter;
     n_primes_init(iter);
-    for (m = 0; m < len; m++)
-        tab[m].m = tab[m].pe = 0;
-    tab[1].m = tab[1].pe = 1;
+    if (pmin > 2) n_primes_jump_after(iter, pmin-1);
     for (p = n_primes_next(iter); p < pmax; p = n_primes_next(iter))
     {
         slong pe, pem, r;
         for (pe = p; pe < len; pe *= p)
             for (m = 1, pem = pe; pem < len; m++, pem += pe)
                 for(r = 1; r < p && pem < len; m++, pem += pe, r++)
-                    if (tab[pem].m == 0) tab[pem].m = m, tab[pem].pe = pe;
+                    if (tab[pem].pe == 1) tab[pem].m = m, tab[pem].pe = pe;
     }
     n_primes_clear(iter);
 }
 void
 pem_init_sieve_all(pem_ptr tab, slong len)
 {
-    pem_init_sieve_upto(tab, len, len);
+    pem_init(tab, len);
+    pem_init_sieve_range(tab, 2, len, len);
 }
 void
 pem_init_sieve_sqrt(pem_ptr tab, slong len)
 {
-    pem_init_sieve_upto(tab, n_sqrt(len), len);
+    pem_init(tab, len);
+    pem_init_sieve_range(tab, 2, n_sqrt(len), len);
 }
 /* visit p^e m with m p-smooth */
 void
-pem_init_sieve_smooth(pem_ptr tab, slong len)
+pem_init_smooth_lim(pem_ptr tab, slong pmax, slong len)
 {
-    slong p, m, pmax = n_sqrt(len);
+    slong p, m;
     char * smooth;
     n_primes_t iter;
     n_primes_init(iter);
@@ -141,10 +152,7 @@ pem_init_sieve_smooth(pem_ptr tab, slong len)
     smooth = flint_malloc(len * sizeof(char));
     memset(smooth, 0, len);
 
-    for (m = 0; m < len; m++)
-        tab[m].m = tab[m].pe = 0;
     smooth[1] = 1;
-    tab[1].m = tab[1].pe = 1;
     for (p = n_primes_next(iter); p < pmax; p = n_primes_next(iter))
     {
         slong pe, pem, r;
@@ -160,6 +168,34 @@ pem_init_sieve_smooth(pem_ptr tab, slong len)
     n_primes_clear(iter);
     flint_free(smooth);
 }
+/* sieve up to sqrt(n) */
+void
+pem_init_smooth_sqrt(pem_ptr tab, slong len)
+{
+    pem_init(tab, len);
+    pem_init_smooth_lim(tab, n_sqrt(len), len);
+}
+/* smooth then usual primes */
+void
+pem_init_smooth_all(pem_ptr tab, slong len)
+{
+    n_primes_t iter;
+    slong p, pmax = n_sqrt(len);
+    pem_init(tab, len);
+    pem_init_smooth_lim(tab, pmax, len);
+    n_primes_init(iter);
+    n_primes_jump_after(iter, pmax);
+    for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
+    {
+        ulong m, pm;
+        for (m = 1, pm = p; pm < len; m++, pm += p)
+        {
+            tab[pm].pe = p;
+            tab[pm].m = m;
+        }
+    }
+    n_primes_clear(iter);
+ }
 
 void
 pem_init_sieve_smooth2(pem_ptr tab, slong len)
@@ -655,14 +691,15 @@ int main(int argc, char * argv[])
     int e, opt_min = 15, opt_max = 28;
     slong opt_print = 0;
 
-#define NUM 6
+#define NUM 7
     const smooth_func func[NUM] = {
         (const smooth_func){ "all", &pem_init_sieve_all },
         (const smooth_func){ "sqrt", &pem_init_sieve_sqrt },
         (const smooth_func){ "mod", &pem_init_mod_strict },
-        (const smooth_func){ "smooth", &pem_init_sieve_smooth },
-        (const smooth_func){ "smooth2", &pem_init_sieve_smooth2 },
-        (const smooth_func){ "rough", &pem_init_rough }
+        (const smooth_func){ "smoothrt", &pem_init_smooth_sqrt },
+        (const smooth_func){ "smoothall", &pem_init_smooth_all },
+        (const smooth_func){ "rough", &pem_init_rough },
+        (const smooth_func){ "rough all", &pem_init_rough_all }
     };
 
     /* options */
@@ -690,7 +727,7 @@ int main(int argc, char * argv[])
         }
         flint_printf("index");
         for (i = 0; i < NUM; i++)
-            flint_printf("  # %8s   ", func[i].name);
+            flint_printf("  # %9s  ", func[i].name);
         flint_printf("\n");
         for (j = 1; j < len; j++)
         {
@@ -737,7 +774,7 @@ int main(int argc, char * argv[])
             (f.func)(tab, len);
             flint_free(tab);
             timeit_stop(t1);
-            flint_printf(" # %4wd [%2.1f]", t1->wall, t1->wall * ref);
+            flint_printf(" # %4wd [%02.1f]", t1->wall, t1->wall * ref);
         }
         flint_printf("\n");
     }
