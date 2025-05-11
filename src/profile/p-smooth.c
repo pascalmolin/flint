@@ -265,12 +265,15 @@ pem_init_sieve_smooth2(pem_ptr tab, slong len)
  * then all 3^e * prime to 2*3 = 6, ie 1, 5 mod 6.
  * then all 5^e * prime to 2*3*5 = 30 ie 1, 7, 11, 13, ...
  * etc.
- * ie shifts for prime p are 1 and prime numbers between p and primorial p#
- * necessary only if p < sqrt(len)
+ * ie shifts for prime p are invertibles mod primorial p#.
+ * For p=7 these are 1 and prime numbers,
+ * for p=11 we also have composite values...
  *
  * Store numbers in complete table tab of length len. All numbers
  * having a prime factor > pmax can be ignored.
  *
+ * FIXME: implementation below is *wrong*. One must loop
+ * over p-rough numbers mod p# for residue and not only primes.
  */
 void
 pem_init_mod(pem_ptr tab, slong pmax, slong len)
@@ -331,7 +334,10 @@ pem_init_mod(pem_ptr tab, slong pmax, slong len)
     n_cleanup_primes();
 }
 /* compute only non trivial factorizations k=p^em,
-   p smallest prime factor */
+   p smallest prime factor.
+
+   Still wrong, need rough implementation.
+*/
 void
 pem_init_mod_strict(pem_ptr tab, slong len)
 {
@@ -691,13 +697,12 @@ int main(int argc, char * argv[])
     int e, opt_min = 15, opt_max = 28;
     slong opt_print = 0;
 
-#define NUM 7
+#define NUM 6
     const smooth_func func[NUM] = {
         (const smooth_func){ "all", &pem_init_sieve_all },
         (const smooth_func){ "sqrt", &pem_init_sieve_sqrt },
-        (const smooth_func){ "mod", &pem_init_mod_strict },
-        (const smooth_func){ "smoothrt", &pem_init_smooth_sqrt },
-        (const smooth_func){ "smoothall", &pem_init_smooth_all },
+        (const smooth_func){ "smoothtab", &pem_init_smooth_sqrt },
+        (const smooth_func){ "tab all", &pem_init_smooth_all },
         (const smooth_func){ "rough", &pem_init_rough },
         (const smooth_func){ "rough all", &pem_init_rough_all }
     };
