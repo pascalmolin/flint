@@ -62,33 +62,56 @@ pem_init(pem_ptr tab, slong len)
 void
 pem_init_rough_lim(pem_ptr tab, slong lim, slong len)
 {
-    slong len1 = len / 2;
-    rough_ptr rough;
+    slong m, len1 = len / 2;
+    rough_ptr rough, p1, m1;
 
-    rough = flint_malloc(len1 * sizeof(struct rough));
+    rough = flint_malloc((len1+1) * sizeof(struct rough));
+
+    /* p=2 is done separately */
+    //for (m = 3; m < len; m += 2)
+    //    for (pe = 2, pem = 2*m; pem < len; pem <<= 1, pe <<= 1)
+    //        tab[pem].pe = pe, tab[pem].m = m;
+    //for (pe = 2; pe < len; pe >> 1)
+    //{
+    //    for (m = 3, pem = 3*pe; pem < len; pem += pe, m+=2)
+    //        tab[pem].pe = pe, tab[pem].m = m;
+    //}
+
+    /* now 2-rough numbers are the odd numbers */
     rough->m = 2;
     rough->prev = NULL;
     rough->next = rough + 1;
-    for (ulong m1 = 1, m = 3; m < len; m1++, m += 2)
+    for (m1 = rough + 1, m = 3; m < len; m1++, m += 2)
     {
-        rough[m1].m = m;
-        rough[m1].prev = rough + m1 - 1;
-        rough[m1].next = rough + m1 + 1;
+        m1->m = m;
+        m1->prev = m1 - 1;
+        m1->next = m1 + 1;
     }
+    /* terminate */
+    m1->m = len;
+    m1->prev = m1 - 1;
+    m1->next = NULL;
 
-    for (rough_ptr p1 = rough; p1->m < lim; p1 = p1->next)
+    for (p1 = rough + 1; p1->m < lim; p1 = p1->next)
     {
         slong p = p1->m, pe;
+        /* skip prime powers p^e */
+        for (pe = p; pe < len; pe *= p)
+        {
+            rough_ptr pe1 = rough + (pe>>1);
+            pe1->next->prev = pe1->prev;
+            pe1->prev->next = pe1->next;
+        }
+        /* then loop on p-rough numbers */
         for (pe = p; pe < len; pe *= p)
         {
             ulong lim = len / pe;
             /* loop m in p-rough numbers */
-            for (rough_ptr m1 = p1->next; m1->m < lim; m1 = m1->next)
+            for (m1 = p1->next; m1->m < lim; m1 = m1->next)
             {
                 slong pem = pe * m1->m;
                 tab[pem].pe = pe;
                 tab[pem].m = m1->m;
-                if (p == 2) continue;
                 /* update links to skip pem */
                 rough_ptr pem1 = rough + (pem>>1);
                 pem1->next->prev = pem1->prev;
