@@ -62,26 +62,26 @@ pem_init(pem_ptr tab, slong len)
 void
 pem_init_rough_lim(pem_ptr tab, slong lim, slong len)
 {
-    slong m, len1 = len / 2;
+    slong m, len1;
     rough_ptr rough, p1, m1;
 
-    rough = flint_malloc((len1+1) * sizeof(struct rough));
-
-    /* p=2 is done separately */
-    //for (m = 3; m < len; m += 2)
-    //    for (pe = 2, pem = 2*m; pem < len; pem <<= 1, pe <<= 1)
-    //        tab[pem].pe = pe, tab[pem].m = m;
+    /* p=2 can be done separately */
+    for (m = 3; m < len; m += 2)
+        for (ulong pe = 2, pem = 2*m; pem < len; pem <<= 1, pe <<= 1)
+            tab[pem].pe = pe, tab[pem].m = m;
     //for (pe = 2; pe < len; pe >> 1)
     //{
     //    for (m = 3, pem = 3*pe; pem < len; pem += pe, m+=2)
     //        tab[pem].pe = pe, tab[pem].m = m;
     //}
 
-    /* now 2-rough numbers are the odd numbers */
-    rough->m = 2;
+    /* now need 2-rough (ie odd) numbers up to len / 3 */
+    len1 = len / 3;
+    rough = flint_malloc((1 + len1/2) * sizeof(struct rough));
+    rough->m = 1;
     rough->prev = NULL;
     rough->next = rough + 1;
-    for (m1 = rough + 1, m = 3; m < len; m1++, m += 2)
+    for (m1 = rough + 1, m = 3; m < len1; m1++, m += 2)
     {
         m1->m = m;
         m1->prev = m1 - 1;
@@ -95,8 +95,8 @@ pem_init_rough_lim(pem_ptr tab, slong lim, slong len)
     for (p1 = rough + 1; p1->m < lim; p1 = p1->next)
     {
         slong p = p1->m, pe;
-        /* skip prime powers p^e */
-        for (pe = p; pe < len; pe *= p)
+        /* skip prime powers p^e up to len1 */
+        for (pe = p; pe < len1; pe *= p)
         {
             rough_ptr pe1 = rough + (pe>>1);
             pe1->next->prev = pe1->prev;
@@ -113,6 +113,7 @@ pem_init_rough_lim(pem_ptr tab, slong lim, slong len)
                 tab[pem].pe = pe;
                 tab[pem].m = m1->m;
                 /* update links to skip pem */
+                if (pem >= len1) continue;
                 rough_ptr pem1 = rough + (pem>>1);
                 pem1->next->prev = pem1->prev;
                 pem1->prev->next = pem1->next;
