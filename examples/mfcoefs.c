@@ -9,6 +9,7 @@
 #include "nmod_mat.h"
 #include "fft_small.h"
 #include "fmpz.h"
+#include "fmpz_poly.h"
 #include "fmpz_mat.h"
 #include "dirichlet.h"
 #include "profiler.h"
@@ -207,8 +208,8 @@ _nmod_poly_euler_product(nn_ptr z, slong len, _nmod_euler_func_t factor, void * 
 void
 _nmod_poly_set_euler_factor_fill(nn_ptr z, slong len, slong p, nmod_t mod)
 {
-    slong e, pe;
-    for (e = 1, pe = p; pe < len; e++, pe *= p)
+    slong pe;
+    for (pe = p; pe < len; pe *= p)
     {
         slong m, pem, r;
         ulong ape = z[pe];
@@ -746,6 +747,57 @@ fmpz_mat_set_transpose_nmod_mat_prime(fmpz_mat_t A, const nmod_mat_t Amod)
             fmpz_set_ui_smod(fmpz_mat_entry(A, j, i),
                              nmod_mat_entry(Amod, i, p), Amod->mod.n);
     n_primes_clear(iter);
+}
+
+/* Rankin-Selberg product, assume small size */
+void
+_nmod_euler_factor_rankin_selberg_gl2(nn_ptr fp, slong deg, slong p, ulong ap, ulong bp, nmod_t mod)
+{
+    /* 1 - a*b*x + p*(a^2 + b^2 - 2p) * x^2 - a*b*p^2 * x^3 + p^4 * x^4 */
+    ulong Q[5] = { 1, 0, 0, 0, 0 };
+    ulong ab = nmod_mul(ap, bp, mod);
+    Q[1] = nmod_neg(ab, mod);
+    if (deg > 1)
+    {
+        ulong ab2,abp;
+        ab2 = nmod_add(ap, bp, mod);
+        ab2 = nmod_mul(ab2, ab2, mod);
+        abp = 2 * nmod_add(ab, p, mod);
+        Q[2] = nmod_mul(nmod_sub(ab2, abp, mod), p, mod);
+        if (deg > 2)
+        { 
+           ulong p2 = nmod_mul(p, p, mod);
+           Q[3] = nmod_mul(Q[1], p2, mod);
+           Q[4] = nmod_mul(p2, p2, mod);
+        }
+    }
+    _nmod_poly_inv_series(fp, Q, 5, deg+1, mod);
+}
+void
+fmpz_euler_factor_rankin_selberg_gl2(fmpz *fp, slong deg, slong p, const fmpz_t a, const fmpz_t b)
+{
+    /* 1 - a*b*x + p*(a^2 + b^2 - 2p) * x^2 - a*b*p^2 * x^3 + p^4 * x^4 */
+    fmpz Q[5];
+    fmpz_init_set_ui(Q + 0, 1);
+    fmpz_init(Q+1);
+    fmpz_mul(Q+1, a, b); fmpz_neg(Q+1, Q+1);
+    if (deg > 1)
+    {
+        /* a^2+b^2-2p = (a+b)^2 - 2ab -2p) */
+        fmpz * ab2p = Q + 2;
+        fmpz_add(ab2p, a, b);
+        fmpz_mul(ab2p, ab2p, ab2p);
+        fmpz_addmul_ui(ab2p, Q+1, 2);
+        fmpz_sub_ui(ab2p, ab2p, 2*p);
+        fmpz_mul_ui(ab2p, ab2p, p);
+        if (deg > 2)
+        {
+            fmpz_mul2_uiui(Q+4, Q+0, p, p);
+            fmpz_mul(Q+3, Q+1, Q+4);
+            fmpz_mul(Q+4, Q+4, Q+4);
+        }
+    }
+    _fmpz_poly_inv_series(fp, Q, 5, deg+1);
 }
 
 int usage(int count, const char * fname[])
