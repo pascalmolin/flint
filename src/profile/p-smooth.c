@@ -48,7 +48,7 @@ pem_init(pem_ptr tab, slong len)
         tab[k].pe = 1, tab[k].m = k;
 }
 
-/* assume tab has been inited */
+/* assume tab has been initialized */
 void
 pem_init_rough_lim(pem_ptr tab, slong lim, slong len)
 {

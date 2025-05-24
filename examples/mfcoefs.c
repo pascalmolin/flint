@@ -257,73 +257,16 @@ smooth_table_init(smooth_ptr tab, slong size, slong len)
     n_primes_clear(iter);
 }
 
-/* compute pmax-smooth numbers less than len, return size */
-
-
-/* first Euler factors, then propagate */
+/* use precomputed table of composite */
 void
-_nmod_poly_euler_product_steps(nn_ptr z, slong len, _nmod_euler_func_t factor, void * ctx, smooth_srcptr tab, nmod_t mod)
-{
-    n_primes_t iter;
-    slong p, B;
-    ulong fp[30];
-    n_primes_init(iter);
-    z[1] = 1;
-    /* set coefficients p^e */
-    for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
-    {
-        slong e, pe, deg = n_flog(len, p);
-        factor(fp, deg, p, ctx, mod);
-        for (e = 1, pe = p; pe < len; e++, pe *= p)
-            z[pe] = fp[e];
-    }
-    /* propagate */
-    B = n_sqrt(len);
-    n_primes_init(iter);
-    for (p = n_primes_next(iter); p < B; p = n_primes_next(iter))
-        _nmod_poly_set_euler_factor_fill(z, len, p, mod);
-    for (; p < len; p = n_primes_next(iter))
-        _nmod_poly_set_euler_factor_fill_large(z, len, p, mod);
-    n_primes_clear(iter);
-}
-void
-_nmod_poly_euler_product_fill(nn_ptr z, slong len, _nmod_euler_func_t factor, void * ctx, nmod_t mod)
-{
-    n_primes_t iter;
-    slong p;
-    ulong fp[30];
-    n_primes_init(iter);
-    z[1] = 1;
-    for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
-    {
-        slong deg = n_flog(len, p);
-        factor(fp, deg, p, ctx, mod);
-        _nmod_poly_set_euler_factor(z, len, fp, deg, p, mod);
-    }
-    n_primes_clear(iter);
-}
-/* fill all composite values */
-/* propagate small smooth values */
-void
-_nmod_poly_set_euler_fill_smooth(nn_ptr z, slong len, smooth_ptr tab, slong size, nmod_t mod)
-{
-    slong i;
-    for (i = 0; i < size; i++)
-    {
-        slong m = tab[i].m, pe = tab[i].pe;
-        z[pe*m] = nmod_mul(z[pe], z[m], mod);
-    }
-}
-
-void
-_nmod_poly_euler_product_precomp(nn_ptr z, slong len, _nmod_euler_func_t factor, void * ctx, smooth_srcptr tab, nmod_t mod)
+_nmod_poly_euler_product_precomp(nn_ptr z, slong len, _nmod_euler_func_t factor, void * ctx, smooth_ptr tab, nmod_t mod)
 {
     slong p, pem;
     ulong fp[30];
     n_primes_t iter;
     n_primes_init(iter);
     z[1] = 1;
-    /* expand Euler factors */
+    /* first expand Euler factors */
     for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
     {
         slong deg = n_flog(len, p), e, pe;
@@ -331,13 +274,137 @@ _nmod_poly_euler_product_precomp(nn_ptr z, slong len, _nmod_euler_func_t factor,
         for (e = 1, pe = p; pe < len; e++, pe *= p)
             z[pe] = fp[e];
     }
-    /* fill values */
+    /* then fill composite */
     for (pem = 2; pem < len; pem++)
     {
         slong m = tab[pem].m, pe = tab[pem].pe;
-        z[pem] = nmod_mul(z[m], z[pe], mod);
+        if (m > 1)
+            z[pem] = nmod_mul(z[m], z[pe], mod);
     }
 }
+
+
+/* precompute decomposition k = p^e*m */
+typedef struct {
+    slong pe;
+    slong m;
+} pem_struct;
+typedef pem_struct * pem_ptr;
+struct rough {
+    ulong m;
+    struct rough * prev;
+    struct rough * next;
+};
+typedef struct rough * rough_ptr;
+
+void
+pem_init_rough_lim(pem_ptr tab, slong lim, slong len)
+{
+    ulong m, pe, pem, len1;
+    rough_ptr rough, p1, m1;
+
+    /* p=2 can be done separately */
+    for (m = 3; m < len; m += 2)
+        for (pe = 2, pem = 2*m; pem < len; pem <<= 1, pe <<= 1)
+            tab[pem].pe = pe, tab[pem].m = m;
+
+    /* now need 2-rough (ie odd) numbers up to len / 3 */
+    len1 = len / 3;
+    rough = flint_malloc((1 + len1/2) * sizeof(struct rough));
+    rough->m = 1;
+    rough->prev = NULL;
+    rough->next = rough + 1;
+    for (m1 = rough + 1, m = 3; m < len1; m1++, m += 2)
+    {
+        m1->m = m;
+        m1->prev = m1 - 1;
+        m1->next = m1 + 1;
+    }
+    /* terminate */
+    m1->m = len;
+    m1->prev = m1 - 1;
+    m1->next = NULL;
+
+    for (p1 = rough + 1; p1->m < lim; p1 = p1->next)
+    {
+        slong p = p1->m, pe;
+        /* skip prime powers p^e up to len1 */
+        for (pe = p; pe < len1; pe *= p)
+        {
+            rough_ptr pe1 = rough + (pe>>1);
+            pe1->next->prev = pe1->prev;
+            pe1->prev->next = pe1->next;
+        }
+        /* then loop on p-rough numbers */
+        for (pe = p; pe < len; pe *= p)
+        {
+            ulong lim = len / pe;
+            /* loop m in p-rough numbers */
+            for (m1 = p1->next; m1->m < lim; m1 = m1->next)
+            {
+                slong pem = pe * m1->m;
+                tab[pem].pe = pe;
+                tab[pem].m = m1->m;
+                /* update links to skip pem */
+                if (pem >= len1) continue;
+                rough_ptr pem1 = rough + (pem>>1);
+                pem1->next->prev = pem1->prev;
+                pem1->prev->next = pem1->next;
+            }
+        }
+    }
+    /* if lim = sqrt(len), rough now links primes > lim */
+    flint_free(rough);
+}
+
+typedef struct {
+    ulong n;
+    ulong a;
+    ulong b;
+} coprime_t;
+typedef coprime_t * coprime_ptr;
+
+coprime_ptr
+coprime_table_init(slong * size, slong len)
+{
+    slong k, n;
+    coprime_ptr fac;
+    pem_ptr tab = flint_malloc(len * sizeof(pem_struct));
+    for (k = 0; k < len; k++)
+        tab[k].pe = tab[k].m = 1;
+    pem_init_rough_lim(tab, n_sqrt(len), len);
+    fac = flint_malloc(len * sizeof(coprime_t));
+    for (n = 0, k = 1; k < len; k++)
+        if(tab[k].m > 1)
+            fac[n++] = (coprime_t){ .n = k, .a = tab[k].pe, .b = tab[k].m };
+    flint_free(tab);
+    *size = n;
+    return flint_realloc(fac, n * sizeof(pem_struct));
+}
+
+/* use precomputed table of composite */
+void
+_nmod_poly_euler_product_coprime_table(nn_ptr z, slong len, _nmod_euler_func_t factor, void * ctx, const coprime_ptr tab, slong size, nmod_t mod)
+{
+    slong p, k;
+    ulong fp[30];
+    n_primes_t iter;
+    n_primes_init(iter);
+    z[1] = 1;
+    /* first expand Euler factors */
+    for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
+    {
+        slong deg = n_flog(len, p), e, pe;
+        factor(fp, deg, p, ctx, mod);
+        for (e = 1, pe = p; pe < len; e++, pe *= p)
+            z[pe] = fp[e];
+    }
+    /* then fill composite */
+    for (k = 0; k < size; k++)
+        z[tab[k].n] = nmod_mul(z[tab[k].a], z[tab[k].b], mod);
+}
+
+/* Euler factors of Eisenstein series */
 
 /* E_2( Mod(1,N) ) as prod_p ((1-p^(-s))*(1-p^(1-s)))^(-1). Assume N prime. */
 void
@@ -612,9 +679,9 @@ nmod_mat_modular_form_expansion_2(nmod_mat_t a, slong deg, slong len, const stru
 {
     nmod_t mod;
     dirichlet_group_t G;
-    slong i, k;
+    slong i, k, size;
     const ulong * coefs = f.coefs;
-    smooth_ptr tab = NULL;
+    coprime_ptr tab = NULL;
     nn_ptr g, g0, g1, g2, g12;
     mpn_ctx_t fft_ctx;
     timeit_t t;
@@ -637,9 +704,11 @@ nmod_mat_modular_form_expansion_2(nmod_mat_t a, slong deg, slong len, const stru
     if (timer)
         timeit_start(t);
 
+    tab = coprime_table_init(&size, len);
+
     g0 = _nmod_vec_init(len);
     g0[0] = 0;
-    _nmod_poly_euler_product_steps(g0, len, _nmod_euler_factor_E2_1N, (void *)f.N, tab, mod);
+    _nmod_poly_euler_product_coprime_table(g0, len, _nmod_euler_factor_E2_1N, (void *)f.N, tab, size, mod);
 
     for (i = 0, g = a->entries; i < deg; g += a->stride, i++)
     {
@@ -672,11 +741,11 @@ nmod_mat_modular_form_expansion_2(nmod_mat_t a, slong deg, slong len, const stru
         mf_eis_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
 
         g1[0] = nmod_set_ui(f.E0[2*k], mod);
-        _nmod_poly_euler_product_steps(g1, len, _nmod_euler_factor_E1_chi, ctx, tab, mod);
+        _nmod_poly_euler_product_coprime_table(g1, len, _nmod_euler_factor_E1_chi, ctx, tab, size, mod);
 
         mf_eis_ctx_dual(ctx, mod);
         g2[0] = nmod_set_ui(f.E0[2*k+1], mod);
-        _nmod_poly_euler_product_steps(g2, len, _nmod_euler_factor_E1_chi, ctx, tab, mod);
+        _nmod_poly_euler_product_coprime_table(g2, len, _nmod_euler_factor_E1_chi, ctx, tab, size, mod);
 
         mf_eis_ctx_clear(ctx);
 
