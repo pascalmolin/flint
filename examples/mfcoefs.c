@@ -378,8 +378,11 @@ coprime_table_init(slong * size, slong len)
         if(tab[k].m > 1)
             fac[n++] = (coprime_t){ .n = k, .a = tab[k].pe, .b = tab[k].m };
     flint_free(tab);
+    for (k = 0; k < n; k++)
+        flint_printf("%ld = %ld * % ld\n", fac[k].n, fac[k].a, fac[k].b );
     *size = n;
-    return flint_realloc(fac, n * sizeof(pem_struct));
+    fac = flint_realloc(fac, n * sizeof(coprime_t));
+    return fac;
 }
 
 /* use precomputed table of composite */
