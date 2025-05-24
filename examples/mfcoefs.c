@@ -378,8 +378,6 @@ coprime_table_init(slong * size, slong len)
         if(tab[k].m > 1)
             fac[n++] = (coprime_t){ .n = k, .a = tab[k].pe, .b = tab[k].m };
     flint_free(tab);
-    for (k = 0; k < n; k++)
-        flint_printf("%ld = %ld * % ld\n", fac[k].n, fac[k].a, fac[k].b );
     *size = n;
     fac = flint_realloc(fac, n * sizeof(coprime_t));
     return fac;
@@ -793,7 +791,8 @@ nmod_mat_modular_form_expansion_2(nmod_mat_t a, slong deg, slong len, const stru
 }
 
 
-/* modular set + transpose, last columns */
+/* set A to be the transpose of the last columns of Amod,
+   assume Amod->c > A->r */
 void
 fmpz_mat_set_transpose_nmod_mat_last(fmpz_mat_t A, const nmod_mat_t Amod)
 {
@@ -806,7 +805,8 @@ fmpz_mat_set_transpose_nmod_mat_last(fmpz_mat_t A, const nmod_mat_t Amod)
                              nmod_mat_entry(Amod, i, j0 + j), Amod->mod.n);
 }
 
-/* modular set + transpose, prime row indices */
+/* set A to be the transpose of Amod, but keep only
+   prime row indices (ie columns of Amod of prime index) */
 void
 fmpz_mat_set_transpose_nmod_mat_prime(fmpz_mat_t A, const nmod_mat_t Amod)
 {
