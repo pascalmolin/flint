@@ -126,6 +126,7 @@ struct mf_eis_ctx {
     ulong * chivec;
 };
 typedef struct mf_eis_ctx mf_eis_ctx_t[1];
+typedef struct mf_eis_ctx mf_eis2_ctx_t[2];
 
 /* Compute the list of character values as powers of z mod p,
  * assume z has exact order ord */
@@ -161,6 +162,18 @@ mf_eis_ctx_clear(mf_eis_ctx_t ctx)
 {
     flint_free(ctx->chivec);
 }
+void
+mf_eis2_ctx_init(mf_eis2_ctx_t ctx, const dirichlet_group_t G1, slong a1, const dirichlet_group_t G2, slong a2, ulong ord, ulong z, nmod_t mod)
+{
+    mf_eis_ctx_init(ctx + 0, G1, a1, ord, z, mod);
+    mf_eis_ctx_init(ctx + 1, G2, a2, ord, z, mod);
+}
+void
+mf_eis2_ctx_clear(mf_eis2_ctx_t ctx)
+{
+    mf_eis_ctx_clear(ctx + 0);
+    mf_eis_ctx_clear(ctx + 1);
+}
 /* change chi -> chi^(-1) */
 void
 mf_eis_ctx_dual(mf_eis_ctx_t ctx, nmod_t mod)
@@ -169,6 +182,12 @@ mf_eis_ctx_dual(mf_eis_ctx_t ctx, nmod_t mod)
     for (k = 0; k < ctx->q; k++)
         if (ctx->chivec[k])
             ctx->chivec[k] = nmod_inv(ctx->chivec[k], mod);
+}
+void
+mf_eis2_ctx_dual(mf_eis2_ctx_t ctx, nmod_t mod)
+{
+    mf_eis_ctx_dual(ctx + 0, mod);
+    mf_eis_ctx_dual(ctx + 1, mod);
 }
 
 /* compute Eisenstein series as Euler product */
@@ -204,48 +223,26 @@ _nmod_poly_euler_product(nn_ptr z, slong len, _nmod_euler_func_t factor, void * 
     }
     n_primes_clear(iter);
 }
-/* same but assume z[p^e] values already set */
-void
-_nmod_poly_set_euler_factor_fill(nn_ptr z, slong len, slong p, nmod_t mod)
-{
-    slong pe;
-    for (pe = p; pe < len; pe *= p)
-    {
-        slong m, pem, r;
-        ulong ape = z[pe];
-        for (m = 1, pem = pe; pem < len; m++, pem += pe)
-            for(r = 1; r < p && pem < len; m++, pem += pe, r++)
-                z[pem] = nmod_mul(z[m], ape, mod);
-    }
-}
-/* assume p > sqrt(len), trivial propagation */
-void
-_nmod_poly_set_euler_factor_fill_large(nn_ptr z, slong len, slong p, nmod_t mod)
-{
-    slong m, pm;
-    ulong ap = z[p];
-    for (m = 1, pm = p; pm < len; m++, pm += p)
-        z[pm] = nmod_mul(z[m], ap, mod);
-}
+
 /* use precomputed smoothed table */
 typedef struct {
-    slong m;
     slong pe;
-} smooth_struct;
-typedef smooth_struct * smooth_ptr;
-typedef const smooth_ptr smooth_srcptr;
+    slong m;
+} pem_struct;
+typedef pem_struct * pem_ptr;
+typedef const pem_ptr pem_srcptr;
 
 /* store complete table of smooth numbers less than len */
 void
-smooth_table_init(smooth_ptr tab, slong size, slong len)
+pem_init_smooth(pem_ptr tab, slong len)
 {
     slong p, m;
     n_primes_t iter;
     n_primes_init(iter);
     for (m = 0; m < len; m++)
-        tab[m].m = tab[m].pe = 0;
+        tab[m].pe = tab[m].m = 0;
     tab[1].m = tab[1].pe = 1;
-    /* TODO: could optimize */
+    /* could optimize */
     for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
     {
         slong pe, pem, r;
@@ -259,7 +256,7 @@ smooth_table_init(smooth_ptr tab, slong size, slong len)
 
 /* use precomputed table of composite */
 void
-_nmod_poly_euler_product_precomp(nn_ptr z, slong len, _nmod_euler_func_t factor, void * ctx, smooth_ptr tab, nmod_t mod)
+_nmod_poly_euler_product_precomp(nn_ptr z, slong len, _nmod_euler_func_t factor, void * ctx, pem_ptr tab, nmod_t mod)
 {
     slong p, pem;
     ulong fp[30];
@@ -283,13 +280,7 @@ _nmod_poly_euler_product_precomp(nn_ptr z, slong len, _nmod_euler_func_t factor,
     }
 }
 
-
 /* precompute coprime decomposition k = p^e*m, p smallest prime */
-typedef struct {
-    slong pe;
-    slong m;
-} pem_struct;
-typedef pem_struct * pem_ptr;
 struct rough {
     ulong m;
     struct rough * prev;
@@ -298,7 +289,7 @@ struct rough {
 typedef struct rough * rough_ptr;
 
 void
-pem_init_rough_lim(pem_ptr tab, slong lim, slong len)
+pem_init_rough(pem_ptr tab, slong lim, slong len)
 {
     ulong m, pe, pem, len1 = (len-1) / 2;
     rough_ptr rough, p1, m1;
@@ -370,16 +361,15 @@ coprime_table_init(slong * size, slong len)
     slong k, n;
     coprime_ptr fac;
     pem_ptr tab = flint_malloc(len * sizeof(pem_struct));
-    /* FIXME: should do a memset to 0 */
     for (k = 0; k < len; k++)
-        tab[k].pe = tab[k].m = 1;
-    pem_init_rough_lim(tab, n_sqrt(len), len);
+        tab[k].pe = tab[k].m = 0;
+    pem_init_rough(tab, n_sqrt(len), len);
     //flint_printf("### tab\n");
     //for (k = 0; k < len; k++)
     //    flint_printf("%ld : %ld * %ld\n",k,tab[k].pe,tab[k].m);
     fac = flint_malloc(len * sizeof(coprime_t));
     for (n = 0, k = 1; k < len; k++)
-        if(tab[k].m > 1)
+        if(tab[k].m)
             fac[n++] = (coprime_t){ .n = k, .a = tab[k].pe, .b = tab[k].m };
     flint_free(tab);
     //flint_printf("### coprime list\n");
@@ -432,7 +422,7 @@ _nmod_euler_factor_E2_1N(nn_ptr fp, slong deg, slong p, void * ctx, nmod_t mod)
     }
 }
 
-/* E_1(chi) as prod_p ((1-chi(p)p^(-s))*(1-p^(-s)))^(-1) */
+/* Lp(E_1(chi))^-1 = ( 1-chi(p)p^(-s) ) * ( 1-p^(-s) ) */
 void
 _nmod_euler_factor_E1_chi(nn_ptr fp, slong deg, slong p, void * ctx_ptr, nmod_t mod)
 {
@@ -442,6 +432,16 @@ _nmod_euler_factor_E1_chi(nn_ptr fp, slong deg, slong p, void * ctx_ptr, nmod_t 
     _nmod_poly_inv_series(fp, Q, 3, deg+1, mod);
 }
 
+/* Lp(E_1(chi,psi))^-1 = ( 1-chi(p)p^(-s) ) * ( 1-psi(p)*p^(-s) ) */
+void
+_nmod_euler_factor_E1_chi_psi(nn_ptr fp, slong deg, slong p, void * ctx_ptr, nmod_t mod)
+{
+    struct mf_eis_ctx * ctx = (struct mf_eis_ctx *)ctx_ptr;
+    ulong chip = ctx[0].chivec[p % ctx[0].q];
+    ulong psip = ctx[1].chivec[p % ctx[1].q];
+    ulong Q[3] = { 1, mod.n - chip - psip, nmod_mul(chip,psip,mod) };
+    _nmod_poly_inv_series(fp, Q, 3, deg+1, mod);
+}
 
 typedef struct {
     slong count_euler;
@@ -478,7 +478,7 @@ nmod_mat_modular_form_expansion(nmod_mat_t a, slong deg, slong len, const struct
      */
     mpn_ctx_init(fft_ctx, mod.n);
 
-    /* initialize with E_2(1 mod N), no constant term */
+    /* Eisenstein part (no product) */
 
     if (timer)
         timeit_start(t);
@@ -573,7 +573,7 @@ nmod_mat_modular_form_expansion_1(nmod_mat_t a, slong deg, slong len, const stru
     dirichlet_group_t G;
     slong i, k;
     const ulong * coefs = f.coefs;
-    smooth_ptr tab;
+    pem_ptr tab;
     nn_ptr g, g0, g1, g2, g12;
     mpn_ctx_t fft_ctx;
     timeit_t t;
@@ -596,8 +596,8 @@ nmod_mat_modular_form_expansion_1(nmod_mat_t a, slong deg, slong len, const stru
     if (timer)
         timeit_start(t);
 
-    tab = (smooth_ptr)flint_malloc(len * sizeof(smooth_struct));
-    smooth_table_init(tab, len, len);
+    tab = (pem_ptr)flint_malloc(len * sizeof(pem_struct));
+    pem_init_smooth(tab, len);
 
     g0 = _nmod_vec_init(len);
     g0[0] = 0;
@@ -959,11 +959,11 @@ int main(int argc, char * argv[])
     if (opt_test)
     {
         /* just timings */
-        smooth_ptr tab;
+        pem_ptr tab;
 
         timeit_start(total_time);
-        tab = flint_malloc(len * sizeof(smooth_struct));
-        smooth_table_init(tab, len, len);
+        tab = flint_malloc(len * sizeof(pem_struct));
+        pem_init_smooth(tab, len);
         flint_free(tab);
         timeit_stop(total_time);
         flint_printf("total cpu = %wd ms  wall = %wd ms\n", total_time->cpu, total_time->wall);
@@ -1016,5 +1016,4 @@ int main(int argc, char * argv[])
         flint_printf("prod  (x%ld) cpu = %wd ms  wall = %wd ms\n", timer->count_prod, timer->cpu_prod, timer->wall_prod);
         flint_printf("total cpu = %wd ms  wall = %wd ms\n", total_time->cpu, total_time->wall);
     }
-
 }
