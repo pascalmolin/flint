@@ -284,7 +284,7 @@ _nmod_poly_euler_product_precomp(nn_ptr z, slong len, _nmod_euler_func_t factor,
 }
 
 
-/* precompute decomposition k = p^e*m */
+/* precompute coprime decomposition k = p^e*m, p smallest prime */
 typedef struct {
     slong pe;
     slong m;
@@ -300,21 +300,21 @@ typedef struct rough * rough_ptr;
 void
 pem_init_rough_lim(pem_ptr tab, slong lim, slong len)
 {
-    ulong m, pe, pem, len1;
+    ulong m, pe, pem, len1 = (len-1) / 2;
     rough_ptr rough, p1, m1;
 
     /* p=2 can be done separately */
-    for (m = 3; m < len; m += 2)
+    for (m = 3; m <= len1; m += 2)
         for (pe = 2, pem = 2*m; pem < len; pem <<= 1, pe <<= 1)
             tab[pem].pe = pe, tab[pem].m = m;
 
     /* now need 2-rough (ie odd) numbers up to len / 3 */
-    len1 = len / 3;
-    rough = flint_malloc((1 + len1/2) * sizeof(struct rough));
+    len1 = (len-1) / 3;
+    rough = flint_malloc((2 + len1/2) * sizeof(struct rough));
     rough->m = 1;
     rough->prev = NULL;
     rough->next = rough + 1;
-    for (m1 = rough + 1, m = 3; m < len1; m1++, m += 2)
+    for (m1 = rough + 1, m = 3; m <= len1; m1++, m += 2)
     {
         m1->m = m;
         m1->prev = m1 - 1;
@@ -325,22 +325,22 @@ pem_init_rough_lim(pem_ptr tab, slong lim, slong len)
     m1->prev = m1 - 1;
     m1->next = NULL;
 
-    for (p1 = rough + 1; p1->m < lim; p1 = p1->next)
+    for (p1 = rough + 1; p1->m <= lim; p1 = p1->next)
     {
         slong p = p1->m, pe;
         /* skip prime powers p^e up to len1 */
-        for (pe = p; pe < len1; pe *= p)
+        for (pe = p; pe <= len1; pe *= p)
         {
             rough_ptr pe1 = rough + (pe>>1);
             pe1->next->prev = pe1->prev;
             pe1->prev->next = pe1->next;
         }
-        /* then loop on p-rough numbers */
-        for (pe = p; pe < len; pe *= p)
+        /* then loop on p-rough numbers (p>=3) */
+        for (pe = p; pe <= len1; pe *= p)
         {
-            ulong lim = len / pe;
+            ulong lim = (len-1) / pe;
             /* loop m in p-rough numbers */
-            for (m1 = p1->next; m1->m < lim; m1 = m1->next)
+            for (m1 = p1->next; m1->m <= lim; m1 = m1->next)
             {
                 slong pem = pe * m1->m;
                 tab[pem].pe = pe;
@@ -370,14 +370,21 @@ coprime_table_init(slong * size, slong len)
     slong k, n;
     coprime_ptr fac;
     pem_ptr tab = flint_malloc(len * sizeof(pem_struct));
+    /* FIXME: should do a memset to 0 */
     for (k = 0; k < len; k++)
         tab[k].pe = tab[k].m = 1;
     pem_init_rough_lim(tab, n_sqrt(len), len);
+    //flint_printf("### tab\n");
+    //for (k = 0; k < len; k++)
+    //    flint_printf("%ld : %ld * %ld\n",k,tab[k].pe,tab[k].m);
     fac = flint_malloc(len * sizeof(coprime_t));
     for (n = 0, k = 1; k < len; k++)
         if(tab[k].m > 1)
             fac[n++] = (coprime_t){ .n = k, .a = tab[k].pe, .b = tab[k].m };
     flint_free(tab);
+    //flint_printf("### coprime list\n");
+    //for (k = 0; k < n; k++)
+    //    flint_printf("%ld = %ld * %ld\n",fac[k].n,fac[k].a,fac[k].b);
     *size = n;
     fac = flint_realloc(fac, n * sizeof(coprime_t));
     return fac;
