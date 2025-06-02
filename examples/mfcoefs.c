@@ -25,15 +25,109 @@
  with E2(N) the usual Eisenstein series of weight 2 and level N
  and E1(chi) the weight one Eisenstein series of character chi.
 
- The coefficients of f are output on an integral basis of
- the Hecke field Q(f), while Eisenstein series coefficients
- are cyclotomic integers.
 
- We input the coefficients c_i modulo a prime p of degree 1 in
- the cyclotomic field.
+ The coefficients of Eisenstein series are computed as lines in
+ a nmod matrix (the modulus having enough roots of unity).
+
+ For big lengths this matrix may be compressed to keep only
+ prime indices.
+
+ E1 a2 a3 a5 ...
+ E2 a2 a3 a5 ...
+
+ A form is a combination of Ei whose coefficients belong
+ to some number ring.
+
+ It is given as a matrix whose rows correspond to integral
+ basis (and columns to generators).
+
+ When several forms are required the matrices may be
+ concatenated.
+
+ A form is then given by a matrix whose lines correspond to an
+ integral basis of the Hecke field.
+
+ We choose to transpose the output so that each line corresponds
+ to a Fourier coefficient. By default only coefficients of
+ prime index are output.
 */
 
 /* data format */
+struct mf_eis_space {
+    const slong N;       // level
+    const slong k;       // weight
+    const slong nchi;    // number of Dirichlet character used
+    const slong * chi;   // characters by Conrey index mod N
+    
+    const slong ord;     // order of root of unity
+    const ulong modp;    // fft prime used for expression
+    const ulong z;       // root of unity for character
+
+    const slong num;     // number of Eisenstein generators
+    const slong * l;     // weight
+    const slong * c;     // character index (-1 for Ek)
+    const slong * d;     // Bd operator
+    const ulong * e0;    // constant terms (two)
+    
+    const slong rows;    // rank of output basis
+    const ulong * basis; // conversion matrix from generators to basis
+
+    const slong dim;     // number of actual forms
+    const char ** poly;  // Hecke polynomial
+    const char ** zk;    // integral basis used
+};
+
+struct mf_eis_form {
+
+    const struct mf_eis_space * space;
+
+    const slong deg; /* degree of the Hecke field */
+    const slong * poly;  /* coefficients of Hecke polynomial */
+
+    const slong denom;   /* denominator of integral basis */
+    const slong * basis; /* denom * integral basis mod poly */
+
+    const ulong * coefs; /* deg * dim matrix, lines */
+};
+
+// [11, [ [2, Mod(1,11)], -3/2; [1, Mod(-1,11), 1, -1], 5/2 ], [-1,2] ]
+const struct mf_eis_space mf11 = {
+    11, 2,
+    2, (const slong[]){ 1, 10 },
+    2, 928284166586369, 928284166586368,
+
+    2,
+    (const slong[]){ 2, 1 },
+    (const slong[]){ 0, 1 },
+    (const slong[]){ 1, 1 },
+    (const ulong[]){ 0, 0, 464142083293185,464142083293185 },
+
+    1,
+    (const ulong[]){ 464142083293183,464142083293187 }
+};
+
+// [43, [ [2, Mod(1, 43)], 1/2*y-1/2;
+//        [1, Mod(42, 43), 1, -1], y/2+5/6;
+//        [1, Mod(7, 43), 1, -1], -y+2/3
+//        ], [Mod(t, t^2 - t + 1), 6], y^2-2 ]
+const struct mf_eis_space mf43 = {
+    43, 2,
+    3, (const slong[]){ 1, 42, 7 },
+    2, 928284166586369, 928284166586368,
+
+    3,
+    (const slong[]){ 2, 1 },
+    (const slong[]){ 0, 1 },
+    (const slong[]){ 1, 1 },
+    (const ulong[]){ 0, 0, 464142083293185,464142083293185 },
+
+    1,
+    (const ulong[]){ 464142083293183,464142083293187 }
+};
+
+
+
+
 struct mf_eis_desc {
     const slong N;       /* level */
     const slong nchi;    /* number n of characters */
@@ -797,6 +891,126 @@ nmod_mat_modular_form_expansion_2(nmod_mat_t a, slong deg, slong len, const stru
     dirichlet_group_clear(G);
 }
 
+void
+nmod_vec_eis_expansion(ulong * a, slong len, coprime_ptr tab, mf_eis_ctx_t ctx)
+{
+
+}
+
+void
+nmod_mat_mf_eis_expansion(nmod_mat_t a, slong len, const struct mf_eis_desc f, mf_timer_t * timer)
+{
+    nmod_t mod;
+    dirichlet_group_t G;
+    slong i, k, size;
+    const ulong * coefs = f.coefs;
+    coprime_ptr tab = NULL;
+    nn_ptr g, g0, g1, g2, g12;
+    mpn_ctx_t fft_ctx;
+    timeit_t t;
+
+    FLINT_ASSERT(deg <= f.degy && deg == nmod_mat_nrows(a));
+    FLINT_ASSERT(len == nmod_mat_ncols(a));
+    FLINT_ASSERT(n_trailing_zeros(f.modp-1) > n_clog2(len));
+
+    nmod_mat_set_mod(a, f.modp);
+    nmod_init(&mod, f.modp);
+    /*
+     Critical part: force mpn_mul (_nmod_poly_mul_mid_mpn_ctx)
+     to use custom 50 bits prime p = mod.n
+     Initialize context fft_ctx accordingly.
+     */
+    mpn_ctx_init(fft_ctx, mod.n);
+
+    /* initialize with E_2(1 mod N), no constant term */
+
+    if (timer)
+        timeit_start(t);
+
+    tab = coprime_table_init(&size, len);
+
+    g0 = _nmod_vec_init(len);
+    g0[0] = 0;
+    _nmod_poly_euler_product_coprime_table(g0, len, _nmod_euler_factor_E2_1N, (void *)f.N, tab, size, mod);
+
+    for (i = 0, g = a->entries; i < deg; g += a->stride, i++)
+    {
+        ulong c = nmod_set_ui(coefs[i], mod);
+        _nmod_vec_scalar_mul_nmod(g, g0, len, c, mod);
+    }
+    _nmod_vec_clear(g0);
+
+    if (timer)
+    {
+        timeit_stop(t);
+        timer->count_euler += 1;
+        timer->cpu_euler += t->cpu;
+        timer->wall_euler += t->wall;
+    }
+
+    /* add products c[k] * E1(chi[k]) * E1(chi[k]^-1) */
+    dirichlet_group_init(G, f.N);
+    g1 = _nmod_vec_init(len);
+    g2 = _nmod_vec_init(len);
+    g12 = _nmod_vec_init(len);
+    for (k = 0; k < f.nchi; k++)
+    {
+        mf_eis_ctx_t ctx;
+
+        /* Eisenstein expansions g1 and g2 = conj(g1) */
+        if (timer)
+            timeit_start(t);
+
+        mf_eis_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
+
+        g1[0] = nmod_set_ui(f.E0[2*k], mod);
+        _nmod_poly_euler_product_coprime_table(g1, len, _nmod_euler_factor_E1_chi, ctx, tab, size, mod);
+
+        mf_eis_ctx_dual(ctx, mod);
+        g2[0] = nmod_set_ui(f.E0[2*k+1], mod);
+        _nmod_poly_euler_product_coprime_table(g2, len, _nmod_euler_factor_E1_chi, ctx, tab, size, mod);
+
+        mf_eis_ctx_clear(ctx);
+
+        if (timer)
+        {
+            timeit_stop(t);
+            timer->count_euler += 2;
+            timer->cpu_euler += t->cpu;
+            timer->wall_euler += t->wall;
+        }
+
+        /* product g12 = g1 * g2 */
+        if (timer)
+            timeit_start(t);
+
+        _nmod_poly_mul_mid_mpn_ctx(g12, 0, len, g1, len, g2, len, mod, fft_ctx);
+        g12[0] = 0;
+
+        if (timer)
+        {
+            timeit_stop(t);
+            timer->count_prod += 1;
+            timer->cpu_prod += t->cpu;
+            timer->wall_prod += t->wall;
+        }
+
+        coefs += f.degy;
+        for (i = 0, g = a->entries; i < deg; g += a->stride, i++)
+        {
+            ulong c = nmod_set_ui(coefs[i], mod);
+            _nmod_vec_scalar_addmul_nmod(g, g12, len, c, mod);
+        }
+
+    }
+    flint_free(tab);
+    _nmod_vec_clear(g12);
+    _nmod_vec_clear(g1);
+    _nmod_vec_clear(g2);
+    mpn_ctx_clear(fft_ctx);
+
+    dirichlet_group_clear(G);
+}
 
 /* set A to be the transpose of the last columns of Amod,
    assume Amod->c > A->r */
