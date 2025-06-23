@@ -107,18 +107,19 @@ const struct mf_eis_space mf11 = {
 const struct mf_eis_space mf23 = {
     23, 2,
     3, (const slong[]){ 1,5,22 },
-    22, 570715254292481, 165626152232624,
+    22, 744953487556609, 327890428415624,
     3,
     (const slong[]){ 2,1,1 }, // weight
-    (const slong[]){ 1,3,2 }, // index
+    (const slong[]){ 0,2,1 }, // index
     (const slong[]){ 1,1,1 }, // d
-    (const ulong[]){ 0,0,1,1,87660967136177,153751443341630 }, // e[0]
-    3, // rank
-    (const ulong[]){ 73563789228892,64666259459551,216951869898920,205217271741967,195003784695111,556419154499629 },
+    (const ulong[]){ 0,0,1,1,36173755343956,166088428102493 }, // e[0]
+    2, // rank
+       // [456958153133828*y + 716793017771430, 398747113901656*y + 239561039144421, 135455648941980*y + 699801604575949]
+    (const ulong[]){ 716793017771430, 239561039144421, 699801604575949, 456958153133828, 398747113901656, 135455648941980 },
     1, // forms
     (const slong[]){ 2 }, // hecke degree
     (const char *[]){ "y^2 - y - 1" }, // hecke pol
-    (const char *[]){ "[1, y]" } // basis
+    (const char *[]){ "[1, y]" }, // basis
 };
 /* [[1, 30, 6], y^2 - y - 1, [Mod(t, t^2 - t + 1), 6], [[3/2], [3/2], [Mod(-t + 2, t^2 - t + 1)], [Mod(t + 1, t^2 - t + 1)]], [-7/2, 3/2, 1/6, 1/2, 4/3, -1]] */
 //const struct mf_eis_space mf31 = {
@@ -154,7 +155,7 @@ const struct mf_eis_space mf41 = {
     40, 587207928709121, 227071490884881,
     4,
     (const slong[]){ 2,1,1,1 }, // weight
-    (const slong[]){ 1,2,3,4 }, // index
+    (const slong[]){ 0,1,2,3 }, // index
     (const slong[]){ 1,1,1,1 }, // d
     (const ulong[]){ 1,1,127699192864814,556572729132039,580642649055909,377124033433130,464057956047059,214951021409062 }, // e[0]
     4, // rank
@@ -449,13 +450,21 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len)
 
     flint_free(tab);
 
+    flint_printf("generators coefs\n");
+    nmod_mat_print(eis);
+
     /* convert to basis */
     nmod_mat_init(basis, mf->rank, mf->num, mf->modp);
-    for (b = mf->basis, i = 0; i < basis->r; i++)
-        for (j = 0; j < basis->c; j++, b++)
-            nmod_mat_entry(basis, i, j) = *b;
+    for (i = 0; i < mf->rank; i++)
+        for (j = 0; j < mf->num; j++, b++)
+            nmod_mat_entry(basis, i, j) = mf->basis[i*mf->num+j];
+    flint_printf("base change\n");
+    nmod_mat_print(basis);
 
     nmod_mat_mul(a, basis, eis);
+
+    flint_printf("base coefs\n");
+    nmod_mat_print(a);
 
     nmod_mat_clear(basis);
     nmod_mat_clear(eis);
@@ -494,8 +503,8 @@ int main(int argc, char * argv[])
 
     nmod_mat_t a;
     fmpz_mat_t m;
-    slong count = 3, cols;
-    const char * mf_name[]       = { "11", "23", "41" };
+    slong count = 3, rows, cols;
+    const char * mf_name[] = { "11", "23", "41" };
     const struct mf_eis_space *f = NULL, mf[] = { mf11 , mf23 , mf41 };
     int opt_all = 0, opt_raw = 0, opt_time = 0, opt_smooth = 0, opt_test = 0;
     long opt_tail = -1;
@@ -537,14 +546,15 @@ int main(int argc, char * argv[])
         return usage(count, mf_name);
 
     cols = n_prime_pi(len);
-    nmod_mat_init(a, f->rank, cols, f->modp);
+    rows = f->rank;
+    nmod_mat_init(a, rows, cols, f->modp);
 
     nmod_mat_modular_form_series(a, f, len);
 
     if (opt_time)
         return 0;
 
-    fmpz_mat_init(m, cols, f->rank);
+    fmpz_mat_init(m, cols, rows);
     fmpz_mat_set_transpose_nmod_mat(m, a);
 
     if (opt_raw)
