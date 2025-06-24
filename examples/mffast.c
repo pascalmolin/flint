@@ -1,4 +1,17 @@
-/* This file is public domain. Author: Pascal Molin. */
+/*
+    Copyright (C) 2025 Pascal Molin
+
+    This file is part of FLINT.
+
+    FLINT is free software: you can redistribute it and/or modify it under
+    the terms of the GNU Lesser General Public License (LGPL) as published
+    by the Free Software Foundation; either version 3 of the License, or
+    (at your option) any later version.  See <https://www.gnu.org/licenses/>.
+*/
+
+/*
+    FLINT program demonstrating computation of modular form coefficients
+*/
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -20,7 +33,7 @@
  Fast computation of modular forms coefficients via
  representation as products of Eisenstein series.
 
- A modular form f in S_2(N) is given as
+ A modular form f in S_k(N) is given as
 
  f = c_0 E2(N) + sum_{i=1}^{n} c_i E1(chi_i)E1(chi_i^-1)
 
@@ -61,7 +74,7 @@ struct mf_eis_space {
                          // TODO: space character
     const slong nchi;    // number of Dirichlet character used
     const slong * chi;   // characters by Conrey index mod N
-    
+
     const slong ord;     // order of root of unity
     const ulong modp;    // fft prime used for expression
     const ulong z;       // root of unity for character
@@ -70,7 +83,7 @@ struct mf_eis_space {
     const slong * l;     // weight
     const slong * c;     // character index (-1 for Ek)
     const slong * d;     // Bd operator
-    
+
     const slong rank;    // rank of output basis
     const ulong * basis; // conversion matrix from generators to basis
                          // rank * num, could be nmod_mat
@@ -421,7 +434,7 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len, mf_ti
     slong size, cols, i, j;
     timeit_t t;
     /* init */
-    
+
     nmod_mat_set_mod(a, mf->modp);
     nmod_init(&mod, mf->modp);
 
@@ -430,7 +443,7 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len, mf_ti
     FLINT_ASSERT(n_prime_pi(len) == nmod_mat_ncols(a));
     FLINT_ASSERT(mf->rank == nmod_mat_nrows(a));
     FLINT_ASSERT(n_trailing_zeros(f.modp-1) > n_clog2(len));
-    
+
 
     /* precompute chars */
     char_ctx = flint_malloc(2 * mf->nchi * sizeof(struct mf_char_ctx));
@@ -444,7 +457,7 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len, mf_ti
 
     /* store eisenstein expansions */
     nmod_mat_init(eis, mf->num, cols, mf->modp);
-    
+
     /* tabulate composite */
     tab = coprime_table_init(&size, len);
     /*
@@ -493,7 +506,7 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len, mf_ti
                 timer->cpu_prod += t->cpu;
                 timer->wall_prod += t->wall;
             }
- 
+
             nmod_vec_set_primes(row, g12, len);
         }
         else
@@ -524,7 +537,7 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len, mf_ti
     for (i = 0; i < 2 * mf->nchi; i++)
         mf_char_ctx_clear(char_ctx + i);
     flint_free(char_ctx);
- 
+
     /* convert to basis */
     nmod_mat_init(basis, mf->rank, mf->num, mf->modp);
     for (i = 0; i < mf->rank; i++)
