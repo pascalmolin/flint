@@ -566,88 +566,131 @@ int usage(int count, const char * fname[])
 
 int main(int argc, char * argv[])
 {
-    slong i, len;
+    slong i, j;
+    slong len0 = 1000, lmax = 1L<<30, lmul = 100;
 
     nmod_mat_t a;
     fmpz_mat_t m;
     slong rows, cols, count = 5;
     const char * mf_name[] = { "11", "23", "41" , "131", "13_4" };
     const struct mf_eis_space *f = NULL, mf[] = { mf11 , mf23 , mf41, mf131, mf13_4 };
-    int opt_all = 0, opt_raw = 0, opt_time = 0, opt_smooth = 0, opt_test = 0;
-    long opt_tail = -1;
+    int opt_raw = 0, opt_time = 0, opt_bench = 0;
+    slong opt_tail = -1;
     mf_timer timer_struct, * timer = NULL;
     timeit_t total_time;
 
     /* options */
     for (i = 1; i < argc;)
     {
-        if (strcmp(argv[i], "--all") == 0)
-            opt_all = 1, i++;
-        else if (strcmp(argv[i], "--raw") == 0)
+        if (strcmp(argv[i], "--raw") == 0)
             opt_raw = 1, i++;
         else if (strcmp(argv[i], "--tail") == 0 && i + 1 < argc)
             opt_tail = atol(argv[i+1]), i +=2 ;
         else if (strcmp(argv[i], "--time") == 0)
             opt_time = 1, i++;
-        else if (strcmp(argv[i], "--test") == 0)
-            opt_test = 1, i++;
+        else if (strcmp(argv[i], "--bench") == 0)
+            opt_bench = 1, i++;
         else break;
     }
 
-    if (opt_tail >= 0) opt_all = 1;
+    if (opt_bench) opt_time = 1, j = 0;
+    if (opt_time) timer = &timer_struct;
 
     /* form and length */
-    if (argc == i + 2)
+    if (opt_bench && argc == i + 3)
     {
-        slong j;
+        len0 = atol(argv[i++]);
+        lmul = atol(argv[i++]);
+        lmax = atol(argv[i++]);
+    }
+    else if (!opt_bench && argc == i + 2)
+    {
         for (j = 0; j < count; j++)
            if (strcmp(argv[i], mf_name[j]) == 0)
                break;
-        f = mf + j;
-        len = atol(argv[i+1]);
+        i++;
+        len0 = lmax = atol(argv[i++]);
     }
 
-    if (argc != i + 2 || len < 1 || f == NULL)
+    if (argc != i || len0 < 1 || j >= count)
         return usage(count, mf_name);
 
-    if (opt_time) {
-        opt_tail = 0;
-        timer = &timer_struct;
-        timer->count_euler = 0;
-        timer->count_prod = 0;
-        timer->cpu_euler = 0;
-        timer->wall_euler = 0;
-        timer->cpu_prod = 0;
-        timer->wall_prod = 0;
-        timeit_start(total_time);
-    }
-    if (opt_tail >= 0) opt_all = 1;
-
-    cols = n_prime_pi(len);
-    rows = f->rank;
-    nmod_mat_init(a, rows, cols, f->modp);
-
-    nmod_mat_modular_form_series(a, f, len, timer);
-
-    if (opt_time)
+    for (; j < count; j = opt_bench ? j+1 : count)
     {
-        timeit_stop(total_time);
-        flint_printf("euler (x%ld) cpu = %wd ms  wall = %wd ms\n", timer->count_euler, timer->cpu_euler, timer->wall_euler);
-        flint_printf("prod  (x%ld) cpu = %wd ms  wall = %wd ms\n", timer->count_prod, timer->cpu_prod, timer->wall_prod);
-        flint_printf("total cpu = %wd ms  wall = %wd ms\n", total_time->cpu, total_time->wall);
-        return 0;
+
+        slong len;
+        f = mf + j;
+
+        for (len = len0; len <= lmax; len = opt_bench ? len*lmul : lmax+1)
+        {
+
+            if (opt_time) {
+                timer->count_euler = 0;
+                timer->count_prod = 0;
+                timer->cpu_euler = 0;
+                timer->wall_euler = 0;
+                timer->cpu_prod = 0;
+                timer->wall_prod = 0;
+                timeit_start(total_time);
+            }
+
+            cols = n_prime_pi(len);
+            rows = f->rank;
+            nmod_mat_init(a, rows, cols, f->modp);
+
+            nmod_mat_modular_form_series(a, f, len, timer);
+
+            if (opt_time)
+            {
+                timeit_stop(total_time);
+
+                if (opt_bench && len == len0)
+                {
+                    flint_printf("%s & length & euler (x%ld) & prod (x%ld) & total \n",
+                            mf_name[j], timer->count_euler, timer->count_prod);
+                    flint_printf("   & %ld & %ld & %ld & %ld\n", len,
+                            timer->wall_euler, timer->wall_prod, total_time->wall);
+                }
+                else if (opt_bench)
+                {
+                    flint_printf("   & %ld & %ld & %ld & %ld\n", len,
+                            timer->wall_euler, timer->wall_prod, total_time->wall);
+                }
+                else
+                {
+                    flint_printf("euler (x%ld) cpu = %wd ms  wall = %wd ms\n", timer->count_euler, timer->cpu_euler, timer->wall_euler);
+                    flint_printf("prod  (x%ld) cpu = %wd ms  wall = %wd ms\n", timer->count_prod, timer->cpu_prod, timer->wall_prod);
+                    flint_printf("total cpu = %wd ms  wall = %wd ms\n", total_time->cpu, total_time->wall);
+                }
+            }
+            else
+            {
+                nmod_mat_t a2;
+                nmod_mat_struct * pa = a;
+                slong size = cols;
+
+                if (opt_tail >= 0)
+                {
+                    size = (opt_tail < cols) ? opt_tail : cols;
+                    nmod_mat_window_init(a2, a, 0, cols - size, rows, cols);
+                    pa = a2;
+                }
+
+                fmpz_mat_init(m, size, rows);
+                fmpz_mat_set_transpose_nmod_mat(m, pa);
+
+                if (opt_tail >= 0)
+                    nmod_mat_window_clear(a2);
+
+                if (opt_raw)
+                    fmpz_mat_print(m);
+                else
+                    fmpz_mat_print_pretty(m);
+                flint_printf("\n");
+
+                fmpz_mat_clear(m);
+            }
+            nmod_mat_clear(a);
+        }
     }
-
-    fmpz_mat_init(m, cols, rows);
-    fmpz_mat_set_transpose_nmod_mat(m, a);
-
-    nmod_mat_clear(a);
-
-    if (opt_raw)
-        fmpz_mat_print(m);
-    else
-        fmpz_mat_print_pretty(m);
-    flint_printf("\n");
-
-    fmpz_mat_clear(m);
 }
