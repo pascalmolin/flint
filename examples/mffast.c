@@ -409,7 +409,7 @@ typedef struct {
 
 /* Modular form */
 void
-nmod_vec_set_primes(nn_ptr a, nn_srcptr g, slong len)
+nmod_vec_get_nmod_vec_primes(nn_ptr a, nn_srcptr g, slong len)
 {
     n_primes_t iter;
     slong j, p;
@@ -481,11 +481,7 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len, mf_ti
                 timeit_start(t);
 
             _nmod_poly_eisenstein_series(g1, len, k, psi1, tab, size, mod);
-            //mf_char_ctx_dual(psi, mod);
             _nmod_poly_eisenstein_series(g2, len, mf->k - k, psi2, tab, size, mod);
-            //mf_char_ctx_dual(psi, mod);
-            //g1[0] = nmod_set_ui(mf->e0[2*i], mod);
-            //g2[0] = nmod_set_ui(mf->e0[2*i+1], mod);
 
             if (timer)
             {
@@ -497,7 +493,6 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len, mf_ti
             }
 
             _nmod_poly_mul_mid_mpn_ctx(g12, 0, len, g1, len, g2, len, mod, fft_ctx);
-            //g12[0] = 0;
 
             if (timer)
             {
@@ -514,7 +509,7 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len, mf_ti
             if (timer)
                 timeit_start(t);
 
-            /* FIXME: need only prime indices */
+            /* TODO: need only prime indices */
             _nmod_poly_eisenstein_series(g12, len, k, psi1, tab, size, mod);
 
             if (timer)
@@ -526,7 +521,7 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len, mf_ti
                 timeit_start(t);
             }
 
-            nmod_vec_set_primes(row, g12, len);
+            nmod_vec_get_nmod_vec_primes(row, g12, len);
         }
     }
     _nmod_vec_clear(g1);
@@ -571,9 +566,9 @@ int usage(int count, const char * fname[])
     flint_printf(" columns indexed by an integral basis of the value field\n");
     flint_printf("options:\n");
     flint_printf(" --raw: raw flint output (matrix size followed by space separated values)\n");
-    flint_printf(" --all: all coefficients a_n (default only a_p)\n");
-    flint_printf(" --tail <n>: output only last <n> coefficients (implies --all)\n");
+    flint_printf(" --tail <n>: output only last <n> coefficients\n");
     flint_printf(" --time: time each step (implies --tail 0)\n");
+    flint_printf(" --bench <nmin> <nmul> <nmax> benchmark all forms.\n");
     return EXIT_FAILURE;
 }
 
