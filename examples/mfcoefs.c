@@ -52,82 +52,6 @@
  prime index are output.
 */
 
-/* data format */
-struct mf_eis_space {
-    const slong N;       // level
-    const slong k;       // weight
-    const slong nchi;    // number of Dirichlet character used
-    const slong * chi;   // characters by Conrey index mod N
-    
-    const slong ord;     // order of root of unity
-    const ulong modp;    // fft prime used for expression
-    const ulong z;       // root of unity for character
-
-    const slong num;     // number of Eisenstein generators
-    const slong * l;     // weight
-    const slong * c;     // character index (-1 for Ek)
-    const slong * d;     // Bd operator
-    const ulong * e0;    // constant terms (two)
-    
-    const slong rows;    // rank of output basis
-    const ulong * basis; // conversion matrix from generators to basis
-
-    const slong dim;     // number of actual forms
-    const char ** poly;  // Hecke polynomial
-    const char ** zk;    // integral basis used
-};
-
-struct mf_eis_form {
-
-    const struct mf_eis_space * space;
-
-    const slong deg; /* degree of the Hecke field */
-    const slong * poly;  /* coefficients of Hecke polynomial */
-
-    const slong denom;   /* denominator of integral basis */
-    const slong * basis; /* denom * integral basis mod poly */
-
-    const ulong * coefs; /* deg * dim matrix, lines */
-};
-
-// [11, [ [2, Mod(1,11)], -3/2; [1, Mod(-1,11), 1, -1], 5/2 ], [-1,2] ]
-const struct mf_eis_space mf11 = {
-    11, 2,
-    2, (const slong[]){ 1, 10 },
-    2, 928284166586369, 928284166586368,
-
-    2,
-    (const slong[]){ 2, 1 },
-    (const slong[]){ 0, 1 },
-    (const slong[]){ 1, 1 },
-    (const ulong[]){ 0, 0, 464142083293185,464142083293185 },
-
-    1,
-    (const ulong[]){ 464142083293183,464142083293187 }
-};
-
-// [43, [ [2, Mod(1, 43)], 1/2*y-1/2;
-//        [1, Mod(42, 43), 1, -1], y/2+5/6;
-//        [1, Mod(7, 43), 1, -1], -y+2/3
-//        ], [Mod(t, t^2 - t + 1), 6], y^2-2 ]
-const struct mf_eis_space mf43 = {
-    43, 2,
-    3, (const slong[]){ 1, 42, 7 },
-    2, 928284166586369, 928284166586368,
-
-    3,
-    (const slong[]){ 2, 1 },
-    (const slong[]){ 0, 1 },
-    (const slong[]){ 1, 1 },
-    (const ulong[]){ 0, 0, 464142083293185,464142083293185 },
-
-    1,
-    (const ulong[]){ 464142083293183,464142083293187 }
-};
-
-
-
-
 struct mf_eis_desc {
     const slong N;       /* level */
     const slong nchi;    /* number n of characters */
@@ -215,12 +139,12 @@ const struct mf_eis_desc f131 = {
 //};
 
 /* store character values */
-struct mf_eis_ctx {
+struct mf_char_ctx {
     ulong q;
     ulong * chivec;
 };
-typedef struct mf_eis_ctx mf_eis_ctx_t[1];
-typedef struct mf_eis_ctx mf_eis2_ctx_t[2];
+typedef struct mf_char_ctx mf_char_ctx_t[1];
+typedef struct mf_char_ctx mf_char2_ctx_t[2];
 
 /* Compute the list of character values as powers of z mod p,
  * assume z has exact order ord */
@@ -241,7 +165,7 @@ dirichlet_chi_vec_nmod(ulong *v, slong nv, const dirichlet_group_t G,
 
 /* store values chi(k) */
 void
-mf_eis_ctx_init(mf_eis_ctx_t ctx, const dirichlet_group_t G, slong a, ulong ord, ulong z, nmod_t mod)
+mf_char_ctx_init(mf_char_ctx_t ctx, const dirichlet_group_t G, slong a, ulong ord, ulong z, nmod_t mod)
 {
     dirichlet_char_t chi;
     dirichlet_char_init(chi, G);
@@ -252,25 +176,25 @@ mf_eis_ctx_init(mf_eis_ctx_t ctx, const dirichlet_group_t G, slong a, ulong ord,
     dirichlet_char_clear(chi);
 }
 void
-mf_eis_ctx_clear(mf_eis_ctx_t ctx)
+mf_char_ctx_clear(mf_char_ctx_t ctx)
 {
     flint_free(ctx->chivec);
 }
 void
-mf_eis2_ctx_init(mf_eis2_ctx_t ctx, const dirichlet_group_t G1, slong a1, const dirichlet_group_t G2, slong a2, ulong ord, ulong z, nmod_t mod)
+mf_char2_ctx_init(mf_char2_ctx_t ctx, const dirichlet_group_t G1, slong a1, const dirichlet_group_t G2, slong a2, ulong ord, ulong z, nmod_t mod)
 {
-    mf_eis_ctx_init(ctx + 0, G1, a1, ord, z, mod);
-    mf_eis_ctx_init(ctx + 1, G2, a2, ord, z, mod);
+    mf_char_ctx_init(ctx + 0, G1, a1, ord, z, mod);
+    mf_char_ctx_init(ctx + 1, G2, a2, ord, z, mod);
 }
 void
-mf_eis2_ctx_clear(mf_eis2_ctx_t ctx)
+mf_char2_ctx_clear(mf_char2_ctx_t ctx)
 {
-    mf_eis_ctx_clear(ctx + 0);
-    mf_eis_ctx_clear(ctx + 1);
+    mf_char_ctx_clear(ctx + 0);
+    mf_char_ctx_clear(ctx + 1);
 }
 /* change chi -> chi^(-1) */
 void
-mf_eis_ctx_dual(mf_eis_ctx_t ctx, nmod_t mod)
+mf_char_ctx_dual(mf_char_ctx_t ctx, nmod_t mod)
 {
     slong k;
     for (k = 0; k < ctx->q; k++)
@@ -278,10 +202,10 @@ mf_eis_ctx_dual(mf_eis_ctx_t ctx, nmod_t mod)
             ctx->chivec[k] = nmod_inv(ctx->chivec[k], mod);
 }
 void
-mf_eis2_ctx_dual(mf_eis2_ctx_t ctx, nmod_t mod)
+mf_char2_ctx_dual(mf_char2_ctx_t ctx, nmod_t mod)
 {
-    mf_eis_ctx_dual(ctx + 0, mod);
-    mf_eis_ctx_dual(ctx + 1, mod);
+    mf_char_ctx_dual(ctx + 0, mod);
+    mf_char_ctx_dual(ctx + 1, mod);
 }
 
 /* compute Eisenstein series as Euler product */
@@ -496,6 +420,8 @@ _nmod_poly_euler_product_coprime_table(nn_ptr z, slong len, _nmod_euler_func_t f
         z[tab[k].n] = nmod_mul(z[tab[k].a], z[tab[k].b], mod);
 }
 
+
+
 /* Euler factors of Eisenstein series */
 
 /* E_2( Mod(1,N) ) as prod_p ((1-p^(-s))*(1-p^(1-s)))^(-1). Assume N prime. */
@@ -520,7 +446,7 @@ _nmod_euler_factor_E2_1N(nn_ptr fp, slong deg, slong p, void * ctx, nmod_t mod)
 void
 _nmod_euler_factor_E1_chi(nn_ptr fp, slong deg, slong p, void * ctx_ptr, nmod_t mod)
 {
-    struct mf_eis_ctx * ctx = (struct mf_eis_ctx *)ctx_ptr;
+    struct mf_char_ctx * ctx = (struct mf_char_ctx *)ctx_ptr;
     ulong chip = ctx->chivec[p % ctx->q];
     ulong Q[3] = { 1, mod.n - chip - 1, chip }; /* (1-chip*x)*(1-x) */
     _nmod_poly_inv_series(fp, Q, 3, deg+1, mod);
@@ -530,7 +456,7 @@ _nmod_euler_factor_E1_chi(nn_ptr fp, slong deg, slong p, void * ctx_ptr, nmod_t 
 void
 _nmod_euler_factor_E1_chi_psi(nn_ptr fp, slong deg, slong p, void * ctx_ptr, nmod_t mod)
 {
-    struct mf_eis_ctx * ctx = (struct mf_eis_ctx *)ctx_ptr;
+    struct mf_char_ctx * ctx = (struct mf_char_ctx *)ctx_ptr;
     ulong chip = ctx[0].chivec[p % ctx[0].q];
     ulong psip = ctx[1].chivec[p % ctx[1].q];
     ulong Q[3] = { 1, mod.n - chip - psip, nmod_mul(chip,psip,mod) };
@@ -603,22 +529,22 @@ nmod_mat_modular_form_expansion(nmod_mat_t a, slong deg, slong len, const struct
     g12 = _nmod_vec_init(len);
     for (k = 0; k < f.nchi; k++)
     {
-        mf_eis_ctx_t ctx;
+        mf_char_ctx_t ctx;
 
         /* Eisenstein expansions g1 and g2 = conj(g1) */
         if (timer)
             timeit_start(t);
 
-        mf_eis_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
+        mf_char_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
 
         g1[0] = nmod_set_ui(f.E0[2*k], mod);
         _nmod_poly_euler_product(g1, len, _nmod_euler_factor_E1_chi, ctx, mod);
 
-        mf_eis_ctx_dual(ctx, mod);
+        mf_char_ctx_dual(ctx, mod);
         g2[0] = nmod_set_ui(f.E0[2*k+1], mod);
         _nmod_poly_euler_product(g2, len, _nmod_euler_factor_E1_chi, ctx, mod);
 
-        mf_eis_ctx_clear(ctx);
+        mf_char_ctx_clear(ctx);
 
         if (timer)
         {
@@ -719,22 +645,22 @@ nmod_mat_modular_form_expansion_1(nmod_mat_t a, slong deg, slong len, const stru
     g12 = _nmod_vec_init(len);
     for (k = 0; k < f.nchi; k++)
     {
-        mf_eis_ctx_t ctx;
+        mf_char_ctx_t ctx;
 
         /* Eisenstein expansions g1 and g2 = conj(g1) */
         if (timer)
             timeit_start(t);
 
-        mf_eis_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
+        mf_char_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
 
         g1[0] = nmod_set_ui(f.E0[2*k], mod);
         _nmod_poly_euler_product_precomp(g1, len, _nmod_euler_factor_E1_chi, ctx, tab, mod);
 
-        mf_eis_ctx_dual(ctx, mod);
+        mf_char_ctx_dual(ctx, mod);
         g2[0] = nmod_set_ui(f.E0[2*k+1], mod);
         _nmod_poly_euler_product_precomp(g2, len, _nmod_euler_factor_E1_chi, ctx, tab, mod);
 
-        mf_eis_ctx_clear(ctx);
+        mf_char_ctx_clear(ctx);
 
         if (timer)
         {
@@ -834,22 +760,22 @@ nmod_mat_modular_form_expansion_2(nmod_mat_t a, slong deg, slong len, const stru
     g12 = _nmod_vec_init(len);
     for (k = 0; k < f.nchi; k++)
     {
-        mf_eis_ctx_t ctx;
+        mf_char_ctx_t ctx;
 
         /* Eisenstein expansions g1 and g2 = conj(g1) */
         if (timer)
             timeit_start(t);
 
-        mf_eis_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
+        mf_char_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
 
         g1[0] = nmod_set_ui(f.E0[2*k], mod);
         _nmod_poly_euler_product_coprime_table(g1, len, _nmod_euler_factor_E1_chi, ctx, tab, size, mod);
 
-        mf_eis_ctx_dual(ctx, mod);
+        mf_char_ctx_dual(ctx, mod);
         g2[0] = nmod_set_ui(f.E0[2*k+1], mod);
         _nmod_poly_euler_product_coprime_table(g2, len, _nmod_euler_factor_E1_chi, ctx, tab, size, mod);
 
-        mf_eis_ctx_clear(ctx);
+        mf_char_ctx_clear(ctx);
 
         if (timer)
         {
@@ -892,7 +818,7 @@ nmod_mat_modular_form_expansion_2(nmod_mat_t a, slong deg, slong len, const stru
 }
 
 void
-nmod_vec_eis_expansion(ulong * a, slong len, coprime_ptr tab, mf_eis_ctx_t ctx)
+nmod_vec_eis_expansion(ulong * a, slong len, coprime_ptr tab, mf_char_ctx_t ctx)
 {
 
 }
@@ -955,22 +881,22 @@ nmod_mat_mf_eis_expansion(nmod_mat_t a, slong len, const struct mf_eis_desc f, m
     g12 = _nmod_vec_init(len);
     for (k = 0; k < f.nchi; k++)
     {
-        mf_eis_ctx_t ctx;
+        mf_char_ctx_t ctx;
 
         /* Eisenstein expansions g1 and g2 = conj(g1) */
         if (timer)
             timeit_start(t);
 
-        mf_eis_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
+        mf_char_ctx_init(ctx, G, f.chi[k], f.ord, f.z, mod);
 
         g1[0] = nmod_set_ui(f.E0[2*k], mod);
         _nmod_poly_euler_product_coprime_table(g1, len, _nmod_euler_factor_E1_chi, ctx, tab, size, mod);
 
-        mf_eis_ctx_dual(ctx, mod);
+        mf_char_ctx_dual(ctx, mod);
         g2[0] = nmod_set_ui(f.E0[2*k+1], mod);
         _nmod_poly_euler_product_coprime_table(g2, len, _nmod_euler_factor_E1_chi, ctx, tab, size, mod);
 
-        mf_eis_ctx_clear(ctx);
+        mf_char_ctx_clear(ctx);
 
         if (timer)
         {

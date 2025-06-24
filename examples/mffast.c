@@ -9,7 +9,9 @@
 #include "nmod_mat.h"
 #include "fft_small.h"
 #include "fmpz.h"
+#include "arith.h"
 #include "fmpz_poly.h"
+#include "fmpq_poly.h"
 #include "fmpz_mat.h"
 #include "dirichlet.h"
 #include "profiler.h"
@@ -112,9 +114,8 @@ const struct mf_eis_space mf23 = {
     (const slong[]){ 2,1,1 }, // weight
     (const slong[]){ 0,2,1 }, // index
     (const slong[]){ 1,1,1 }, // d
-    (const ulong[]){ 0,0,1,1,36173755343956,166088428102493 }, // e[0]
+    (const ulong[]){ 0,0,372476743778306,372476743778306,36173755343956,166088428102493 }, // e[0]
     2, // rank
-       // [456958153133828*y + 716793017771430, 398747113901656*y + 239561039144421, 135455648941980*y + 699801604575949]
     (const ulong[]){ 716793017771430, 239561039144421, 699801604575949, 456958153133828, 398747113901656, 135455648941980 },
     1, // forms
     (const slong[]){ 2 }, // hecke degree
@@ -187,6 +188,7 @@ const struct mf_eis_space mf41 = {
 /* character values mod N */
 struct mf_char_ctx {
     ulong q;
+    ulong a;
     ulong * chivec;
 };
 typedef struct mf_char_ctx mf_char_ctx_t[1];
@@ -217,6 +219,7 @@ mf_char_ctx_init(mf_char_ctx_t ctx, const dirichlet_group_t G, slong a, ulong or
     dirichlet_char_init(chi, G);
     dirichlet_char_log(chi, G, a);
     ctx->q = G->q;
+    ctx->a = a;
     ctx->chivec = (ulong *)flint_malloc(G->q*sizeof(ulong));
     dirichlet_chi_vec_nmod(ctx->chivec, G->q, G, chi, ord, z, mod);
     dirichlet_char_clear(chi);
@@ -337,6 +340,42 @@ coprime_table_init(slong * size, slong len)
     return fac;
 }
 
+/* stupid: doing slong -> fmpq -> ulong internally, no matter */
+void
+nmod_poly_bernoulli(nmod_poly_t pol, slong n)
+{
+    fmpq_poly_t polq;
+    fmpq_poly_init(polq);
+    arith_bernoulli_polynomial(polq, n);
+    fmpq_poly_get_nmod_poly(pol, polq);
+    fmpq_poly_clear(polq);
+}
+
+ulong
+eisenstein_constant(slong k, mf_char_ctx_t psi, nmod_t mod)
+{
+    slong a;
+    ulong m, e0 = 0, N = psi->q;
+    nmod_poly_t pol;
+
+    if (psi->a == 1)
+        return 0;
+
+    nmod_poly_init_mod(pol, mod);
+    nmod_poly_bernoulli(pol, k);
+
+    /* - 1/2 * N^(k-1)/k * sum psi(a) pol(a/N) */
+    for (a = 0; a < psi->q; a++)
+    {
+        ulong paN = nmod_poly_evaluate_nmod(pol, nmod_div(a, N, mod));
+        e0 = nmod_add(e0, nmod_mul(psi->chivec[a], paN, mod), mod);
+    }
+    m = nmod_div(nmod_pow_ui(N, k-1, mod), mod.n - 2 * k, mod);
+    e0 = nmod_mul(e0, m, mod);
+    nmod_poly_clear(pol);
+    return e0;
+}
+
 /* Eisenstein series: direct algorithm */
 void
 _nmod_poly_eisenstein_series(nn_ptr z, slong len, slong k, mf_char_ctx_t psi, const coprime_ptr tab, slong size, nmod_t mod)
@@ -344,6 +383,7 @@ _nmod_poly_eisenstein_series(nn_ptr z, slong len, slong k, mf_char_ctx_t psi, co
     slong p;
     n_primes_t iter;
     n_primes_init(iter);
+    z[0] = eisenstein_constant(k, psi, mod);
     z[1] = 1;
     /* first expand Euler factors */
     for (p = n_primes_next(iter); p < len; p = n_primes_next(iter))
@@ -361,6 +401,17 @@ _nmod_poly_eisenstein_series(nn_ptr z, slong len, slong k, mf_char_ctx_t psi, co
         z[tab[k].n] = nmod_mul(z[tab[k].a], z[tab[k].b], mod);
 }
 
+typedef struct {
+    slong count_euler;
+    slong count_prod;
+    slong cpu_euler;
+    slong wall_euler;
+    slong cpu_prod;
+    slong wall_prod;
+    slong cpu_total;
+    slong wall_total;
+} mf_timer;
+
 /* Modular form */
 void
 nmod_vec_set_primes(nn_ptr a, nn_srcptr g, slong len)
@@ -376,7 +427,7 @@ nmod_vec_set_primes(nn_ptr a, nn_srcptr g, slong len)
 }
 
 void
-nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len)
+nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len, mf_timer * timer)
 {
     nmod_t mod;
     coprime_ptr tab = NULL;
@@ -385,8 +436,8 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len)
     nn_ptr g1, g2, g12;
     nmod_mat_t eis, basis;
     mpn_ctx_t fft_ctx;
-    const ulong * b;
     slong size, cols, i, j;
+    timeit_t t;
     /* init */
     
     nmod_mat_set_mod(a, mf->modp);
@@ -409,10 +460,13 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len)
     tab = coprime_table_init(&size, len);
 
     /* precompute chars */
-    char_ctx = flint_malloc(mf->nchi * sizeof(struct mf_char_ctx));
+    char_ctx = flint_malloc(2 * mf->nchi * sizeof(struct mf_char_ctx));
     dirichlet_group_init(G, mf->N);
     for (i = 0; i < mf->nchi; i++)
-        mf_char_ctx_init(char_ctx + i, G, mf->chi[i], mf->ord, mf->z, mod);
+    {
+        mf_char_ctx_init(char_ctx + 2*i, G, mf->chi[i], mf->ord, mf->z, mod);
+        mf_char_ctx_init(char_ctx + 2*i+1, G, n_invmod(mf->chi[i],mf->N), mf->ord, mf->z, mod);
+    }
     dirichlet_group_clear(G);
 
     /* compute eisenstein expansions */
@@ -424,23 +478,59 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len)
     {
         slong k = mf->l[i], c = mf->c[i];
         nn_ptr row = nmod_mat_entry_ptr(eis, i, 0);
-        mf_char_ctx_ptr psi = (c == -1) ? NULL : char_ctx + mf->c[i];
+        mf_char_ctx_ptr psi1 = (c == -1) ? NULL : char_ctx + 2 * mf->c[i];
+        mf_char_ctx_ptr psi2 = (c == -1) ? NULL : char_ctx + 2 * mf->c[i] + 1;
         if (k < mf->k)
         {
-            _nmod_poly_eisenstein_series(g1, len, k, psi, tab, size, mod);
-            mf_char_ctx_dual(psi, mod);
-            _nmod_poly_eisenstein_series(g2, len, k, psi, tab, size, mod);
-            mf_char_ctx_dual(psi, mod);
-            g1[0] = nmod_set_ui(mf->e0[2*i], mod);
-            g2[0] = nmod_set_ui(mf->e0[2*i+1], mod);
+             if (timer)
+                timeit_start(t);
+
+            _nmod_poly_eisenstein_series(g1, len, k, psi1, tab, size, mod);
+            //mf_char_ctx_dual(psi, mod);
+            _nmod_poly_eisenstein_series(g2, len, k, psi2, tab, size, mod);
+            //mf_char_ctx_dual(psi, mod);
+            //g1[0] = nmod_set_ui(mf->e0[2*i], mod);
+            //g2[0] = nmod_set_ui(mf->e0[2*i+1], mod);
+
+            if (timer)
+            {
+                timeit_stop(t);
+                timer->count_euler += 2;
+                timer->cpu_euler += t->cpu;
+                timer->wall_euler += t->wall;
+                timeit_start(t);
+            }
+
             _nmod_poly_mul_mid_mpn_ctx(g12, 0, len, g1, len, g2, len, mod, fft_ctx);
-            g12[0] = 0;
+            //g12[0] = 0;
+
+            if (timer)
+            {
+                timeit_stop(t);
+                timer->count_prod += 1;
+                timer->cpu_prod += t->cpu;
+                timer->wall_prod += t->wall;
+            }
+ 
             nmod_vec_set_primes(row, g12, len);
         }
         else
         {
+            if (timer)
+                timeit_start(t);
+
             /* FIXME: need only prime indices */
-            _nmod_poly_eisenstein_series(g12, len, k, psi, tab, size, mod);
+            _nmod_poly_eisenstein_series(g12, len, k, psi1, tab, size, mod);
+
+            if (timer)
+            {
+                timeit_stop(t);
+                timer->count_euler += 1;
+                timer->cpu_euler += t->cpu;
+                timer->wall_euler += t->wall;
+                timeit_start(t);
+            }
+
             nmod_vec_set_primes(row, g12, len);
         }
     }
@@ -450,21 +540,13 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len)
 
     flint_free(tab);
 
-    flint_printf("generators coefs\n");
-    nmod_mat_print(eis);
-
     /* convert to basis */
     nmod_mat_init(basis, mf->rank, mf->num, mf->modp);
     for (i = 0; i < mf->rank; i++)
-        for (j = 0; j < mf->num; j++, b++)
+        for (j = 0; j < mf->num; j++)
             nmod_mat_entry(basis, i, j) = mf->basis[i*mf->num+j];
-    flint_printf("base change\n");
-    nmod_mat_print(basis);
 
     nmod_mat_mul(a, basis, eis);
-
-    flint_printf("base coefs\n");
-    nmod_mat_print(a);
 
     nmod_mat_clear(basis);
     nmod_mat_clear(eis);
@@ -508,6 +590,8 @@ int main(int argc, char * argv[])
     const struct mf_eis_space *f = NULL, mf[] = { mf11 , mf23 , mf41 };
     int opt_all = 0, opt_raw = 0, opt_time = 0, opt_smooth = 0, opt_test = 0;
     long opt_tail = -1;
+    mf_timer timer_struct, * timer = NULL;
+    timeit_t total_time;
 
     /* options */
     for (i = 1; i < argc;)
@@ -545,14 +629,33 @@ int main(int argc, char * argv[])
     if (argc != i + 2 || len < 1 || f == NULL)
         return usage(count, mf_name);
 
+    if (opt_time) {
+        opt_tail = 0;
+        timer = &timer_struct;
+        timer->count_euler = 0;
+        timer->count_prod = 0;
+        timer->cpu_euler = 0;
+        timer->wall_euler = 0;
+        timer->cpu_prod = 0;
+        timer->wall_prod = 0;
+        timeit_start(total_time);
+    }
+    if (opt_tail >= 0) opt_all = 1;
+
     cols = n_prime_pi(len);
     rows = f->rank;
     nmod_mat_init(a, rows, cols, f->modp);
 
-    nmod_mat_modular_form_series(a, f, len);
+    nmod_mat_modular_form_series(a, f, len, timer);
 
     if (opt_time)
+    {
+        timeit_stop(total_time);
+        flint_printf("euler (x%ld) cpu = %wd ms  wall = %wd ms\n", timer->count_euler, timer->cpu_euler, timer->wall_euler);
+        flint_printf("prod  (x%ld) cpu = %wd ms  wall = %wd ms\n", timer->count_prod, timer->cpu_prod, timer->wall_prod);
+        flint_printf("total cpu = %wd ms  wall = %wd ms\n", total_time->cpu, total_time->wall);
         return 0;
+    }
 
     fmpz_mat_init(m, cols, rows);
     fmpz_mat_set_transpose_nmod_mat(m, a);
