@@ -502,7 +502,7 @@ nmod_mat_modular_form_series(nmod_mat_t a, const mf_space_t mf, slong len, mf_ti
                 timer->wall_prod += t->wall;
             }
 
-            nmod_vec_set_primes(row, g12, len);
+            nmod_vec_get_nmod_vec_primes(row, g12, len);
         }
         else
         {
